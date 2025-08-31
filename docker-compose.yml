@@ -1,0 +1,29 @@
+services:
+  aisearch-app:
+    container_name: aisearch-app
+    env_file:
+      - .env
+    volumes:
+      - ./:/backend
+      - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
+      - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
+    ports:
+      - ${APP_PORT}:${APP_PORT}
+    healthcheck:
+      test: "curl -f ${APP_HOST}:${APP_PORT}/healthcheck || exit 1"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command: >
+      sh -c "
+        poetry run gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker --access-logfile ${GUNICORN_LOGS_CONTR_PATH}/access.log --error-logfile ${GUNICORN_LOGS_CONTR_PATH}/error.log
+      "
+
+  aisearch-celery-worker:
+    container_name: aisearch-celery-worker
+    command: celery -A app.infrastructure.worker.celery_worker:worker worker --beat --loglevel=info --concurrency ${CELERY_WORKERS_NUM}
+    volumes:
+      - ./:/backend
+      - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
+    env_file:
+      - .env
