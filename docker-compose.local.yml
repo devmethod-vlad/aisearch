@@ -1,11 +1,15 @@
 services:
   aisearch-app:
+#    docker tag localhost:5001/aisearch-app-dev-local:latest aisearch-app-dev-local:latest
 #    build:
 #      context: .
 #      dockerfile: Dockerfile_dev
-    image: aisearch-app-dev-local:latest
+    image: localhost:5001/aisearch-app-dev-local:latest
     healthcheck:
       disable: true
+    shm_size: "4g"
+    environment:
+      PYTHONWARNINGS: "ignore::SyntaxWarning:whoosh\\..*"
     networks:
       - default
       - service-network
@@ -18,17 +22,18 @@ services:
               capabilities: [ gpu ]
     command: >
       sh -c "
-        poetry run uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
+        exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
       "
 
   aisearch-celery-worker:
-    image: aisearch-app-dev-local:latest
+    image: localhost:5001/aisearch-app-dev-local:latest
     networks:
       - default
       - service-network
     depends_on:
       - aisearch-app
       - aisearch-milvus
+    shm_size: "4g"
     deploy:
       resources:
         reservations:
@@ -36,6 +41,24 @@ services:
             - driver: nvidia
               count: all
               capabilities: [ gpu ]
+
+  aisearch-beat:
+    image: localhost:5001/aisearch-app-dev-local:latest
+    container_name: aisearch-beat
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+      - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
+    env_file:
+      - .env
+    networks:
+      - default
+      - service-network
+    command: celery -A app.infrastructure.worker.celery_worker:worker beat --loglevel=INFO
+    depends_on:
+      - aisearch-celery-worker
+    restart: unless-stopped
 
   aisearch-etcd:
     container_name: aisearch-etcd
@@ -108,9 +131,9 @@ services:
     depends_on:
       - aisearch-milvus
 
-  opensearch:
+  aisearch-opensearch:
     image: opensearchproject/opensearch:2.12.0
-    container_name: opensearch
+    container_name: aisearch-opensearch
     environment:
       - discovery.type=single-node
       - plugins.security.disabled=true
@@ -122,11 +145,44 @@ services:
         hard: -1
     ports:
       - "9200:9200"
+    networks:
+      - default
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9200" ]
       interval: 10s
       timeout: 5s
       retries: 30
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ./hf-cache:/root/.cache/huggingface
+    env_file:
+      - .env
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - HF_HUB_OFFLINE=1             # жестко оффлайн, чтобы не лез в сеть
+    networks:
+      - default
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [ "gpu" ]
+              driver: nvidia
+              count: "all"
+    shm_size: "16g"
+    command: >
+      --model ${VLLM_MODEL}
+      --quantization awq
+      --served-model-name mistral-nemo-awq
+      --max-model-len 8192
+      --gpu-memory-utilization 0.92
+      --trust-remote-code
+      --port 8000
 
 networks:
   default:

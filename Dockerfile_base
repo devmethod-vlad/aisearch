@@ -1,0 +1,33 @@
+FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
+ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Moscow
+
+# тулчейн и заголовки для сборки CPython
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl ca-certificates wget git curl xz-utils \
+    libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev \
+    libffi-dev liblzma-dev tk-dev libncursesw5-dev libgdbm-dev \
+ && rm -rf /var/lib/apt/lists/* \
+ && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime  \
+ && echo $TZ > /etc/timezone
+
+WORKDIR /tmp
+# собираем CPython 3.12.1 с оптимизациями
+RUN curl -fsSLO https://www.python.org/ftp/python/3.12.1/Python-3.12.1.tgz \
+ && tar -xzf Python-3.12.1.tgz \
+ && cd Python-3.12.1 \
+ && ./configure --prefix=/usr/local --enable-optimizations --with-lto \
+ && make -j"$(nproc)" \
+ && make altinstall \
+ && /usr/local/bin/python3.12 -m ensurepip --upgrade \
+ && ln -s /usr/local/bin/pip3.12 /usr/local/bin/pip \
+ && ln -s /usr/local/bin/python3.12 /usr/local/bin/python3
+
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+
+ENV UV_HTTP_TIMEOUT=300 \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/root/.local/bin:${PATH}"
+
+CMD ["python3", "-V"]

@@ -1,4 +1,3 @@
-import datetime
 from typing import Self
 
 from pydantic import RedisDsn, model_validator
@@ -27,27 +26,6 @@ class AppSettings(EnvBaseSettings):
     logs_contr_path: str
 
     model_name: str
-
-    knowledge_base_minitable_google_link: str
-    knowledge_base_megatable_google_link: str
-    knowledge_base_main_header_text: str
-    knowledge_base_target_columns: str | list[str]
-    knowledge_base_roles_separator: str
-    knowledge_base_collect_data_time: datetime.time
-
-    confluence_url: str
-    confluence_token: str
-
-    edu_emias_url: str
-    edu_emias_token: str
-    edu_emias_attachments_page_id: str
-
-    @model_validator(mode="after")
-    def assemble_app_settings(self) -> Self:
-        """Досборка настроек приложения"""
-        if isinstance(self.knowledge_base_target_columns, str):
-            self.knowledge_base_target_columns = self.knowledge_base_target_columns.split(";")
-        return self
 
     model_config = SettingsConfigDict(env_prefix="app_")
 
@@ -101,6 +79,125 @@ class RestrictionSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="restrict_")
 
 
+class VLLMSettings(EnvBaseSettings):
+    """Настройки клиента LLM"""
+
+    base_url: str
+    api_key: str | None = None
+    model: str
+    max_input_tokens: int = 4096
+    max_output_tokens: int = 512
+    temperature: float = 0.7
+    top_p: float = 0.9
+    request_timeout: int = 60
+    stream: bool = False
+    model_config = SettingsConfigDict(env_prefix="vllm_")
+
+
+class ConcurrencySettings(EnvBaseSettings):
+    """Настройки параллельности локально"""
+
+    local_llm_sem: int = 2
+    model_config = SettingsConfigDict(env_prefix="concurrency_")
+
+
+class HybridSearchSettings(EnvBaseSettings):
+    """Настройки глобального поиска"""
+
+    dense_top_k: int = 20
+    lex_top_k: int = 50
+    top_k: int = 5
+    w_ce: float = 0.6
+    w_dense: float = 0.25
+    w_lex: float = 0.15
+    dense_threshold: float = 0.0
+    lex_threshold: float = 0.0
+    ce_threshold: float = 0.0
+    cache_ttl: int = 3600
+    version: str = "v1"
+    model_config = SettingsConfigDict(env_prefix="hybrid_")
+
+
+class SearchSwitches(EnvBaseSettings):
+    """Настройки переключателей поиска"""
+
+    use_opensearch: bool = True
+    use_bm25: bool = False
+    use_reranker: bool = True
+    use_hybrid: bool = True  # общий выключатель гибрида
+    model_config = SettingsConfigDict(env_prefix="search_")
+
+
+class LLMQueueSettings(EnvBaseSettings):
+    """Настройки очереди вне семафора"""
+
+    queue_list_key: str = "llm:queue:list"
+    ticket_hash_prefix: str = "llm:ticket:"
+    max_size: int = 100
+    ticket_ttl: int = 3600
+    drain_interval_sec: int = 1
+    processing_list_key: str | None = None
+
+    model_config = SettingsConfigDict(env_prefix="llm_queue_")
+
+
+class LLMGlobalSemaphoreSettings(EnvBaseSettings):
+    """Настройки глобального семафора"""
+
+    key: str = "llm:{global}:sem"
+    limit: int = 2
+    ttl_ms: int = 120000
+    wait_timeout_ms: int = 30000
+    heartbeat_ms: int = 30000
+
+    model_config = SettingsConfigDict(env_prefix="llm_global_sem_")
+
+
+class OpenSearchSettings(EnvBaseSettings):
+    """Настройки OpenSearch"""
+
+    host: str
+    port: int
+    index_name: str
+    use_ssl: bool = False
+    verify_certs: bool = False
+    user: str | None = None
+    password: str | None = None
+    query_profile: str = "fast"
+    query_fields: str = "question,analysis,answer"
+    operator: str = "or"
+    min_should_match: int = 1
+    fuzziness: int = 0
+    use_rescore: bool = False
+    model_config = SettingsConfigDict(env_prefix="os_")
+
+
+class BM25Settings(EnvBaseSettings):
+    """Настройки BM25"""
+
+    engine: str = "whoosh"
+    index_path: str = "/data/bm25_index"
+    schema_fields: str = "question,analysis,answer"
+    model_config = SettingsConfigDict(env_prefix="bm25_")
+
+
+class RerankerSettings(EnvBaseSettings):
+    """Cross Encoder настройки"""
+
+    model_name: str = "BAAI/bge-reranker-v2-m3"
+    device: str = "cpu"
+    model_config = SettingsConfigDict(env_prefix="reranker_")
+
+
+class WarmupSettings(BaseSettings):
+    """Прогрев модели"""
+
+    enabled: bool = True
+    ce_pairs: str = ""
+    embed_texts: str = ""
+    model_config = SettingsConfigDict(env_prefix="warmup_")
+
+
 class CelerySettings(EnvBaseSettings):
     """Настройки Celery"""
 
@@ -111,6 +208,19 @@ class CelerySettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="celery_")
 
 
+class MilvusDenseSettings(EnvBaseSettings):
+    """Настройки Milvus"""
+
+    host: str = "aisearch-milvus"
+    port: int = 19530
+    collection: str = "kb_default"
+    vector_field: str = "embedding"
+    id_field: str = "ext_id"
+    output_fields: str = "ext_id,question,analysis,answer"
+    app_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model_config = SettingsConfigDict(env_prefix="milvus_")
+
+
 class Settings(EnvBaseSettings):
     """Настройки проекта."""
 
@@ -119,6 +229,16 @@ class Settings(EnvBaseSettings):
     redis: RedisSettings = RedisSettings()
     restrictions: RestrictionSettings = RestrictionSettings()
     celery: CelerySettings = CelerySettings()
+    vllm: VLLMSettings = VLLMSettings()
+    hybrid: HybridSearchSettings = HybridSearchSettings()
+    search: SearchSwitches = SearchSwitches()
+    llm_queue: LLMQueueSettings = LLMQueueSettings()
+    llm_global_sem: LLMGlobalSemaphoreSettings = LLMGlobalSemaphoreSettings()
+    opensearch: OpenSearchSettings = OpenSearchSettings()
+    bm25: BM25Settings = BM25Settings()
+    reranker: RerankerSettings = RerankerSettings()
+    milvus_dense: MilvusDenseSettings = MilvusDenseSettings()
+    warmup: WarmupSettings = WarmupSettings()
 
 
 settings = Settings()

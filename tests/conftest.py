@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator, Generator
 
 import pytest
-from dishka import AsyncContainer, Provider, Scope, make_async_container, provide
+from dishka import AsyncContainer, make_async_container
 from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from faker import Faker
 from fastapi import FastAPI
@@ -11,22 +11,17 @@ from pydantic import RedisDsn
 from testcontainers.redis import RedisContainer
 
 from app.api.v1.routers.base import router as base_router
-from app.api.v1.routers.knowledge_base import router as knowledge_base_router
 from app.api.v1.routers.semantic_search import router as semantic_search_router
 from app.api.v1.routers.taskmanager import router as taskmanager_router
 from app.common.logger import LoggerType
-from app.domain.adapters.interfaces import IConfluenceAdapter, IEduAdapter, IGoogleTablesAdapter
 from app.infrastructure.ioc import ApplicationProvider
 from app.infrastructure.providers import AuthProvider, LoggerProvider, RedisProvider
-from app.services.interfaces import IKnowledgeBaseService, ISemanticSearchService
+from app.services.interfaces import ISemanticSearchService
 from app.settings.config import (
     AppSettings,
     RedisSettings,
     Settings,
 )
-from tests.mocks.mock_confluence_adapter import MockOverriddenConfluenceAdapter
-from tests.mocks.mock_edu_adapter import MockEduAdapter
-from tests.mocks.mock_google_tables_adapter import MockOverriddenGoogleTablesAdapter
 
 
 @pytest.fixture(scope="session")
@@ -86,20 +81,7 @@ def settings(redis_container: RedisContainer) -> Settings:
 @pytest.fixture(scope="session")
 async def container(settings: Settings) -> AsyncContainer:
     """Фикстура контейнера зависимостей"""
-
     # Mock* - наследован от интерфейса, MockOverriden* - унаследован от основого класса
-    class MockConfluenceAdapterContainer(Provider):
-        confluence_adapter = provide(
-            MockOverriddenConfluenceAdapter, scope=Scope.REQUEST, provides=IConfluenceAdapter
-        )
-
-    class MockEduAdapterProvider(Provider):
-        edu_adapter = provide(MockEduAdapter, scope=Scope.REQUEST, provides=IEduAdapter)
-
-    class MockGoogleTablesAdapterContainer(Provider):
-        google_tables_adapter = provide(
-            MockOverriddenGoogleTablesAdapter, scope=Scope.REQUEST, provides=IGoogleTablesAdapter
-        )
 
     container = make_async_container(
         ApplicationProvider(),
@@ -107,9 +89,6 @@ async def container(settings: Settings) -> AsyncContainer:
         AuthProvider(),
         RedisProvider(),
         LoggerProvider(),
-        MockConfluenceAdapterContainer(),
-        MockEduAdapterProvider(),
-        MockGoogleTablesAdapterContainer(),
         context={
             AppSettings: settings.app,
             RedisSettings: settings.redis,
@@ -132,12 +111,6 @@ async def semantic_search_service(request_container: AsyncContainer) -> ISemanti
     return await request_container.get(ISemanticSearchService)
 
 
-@pytest.fixture
-async def knowledge_base_service(request_container: AsyncContainer) -> IKnowledgeBaseService:
-    """Сервис базы знаний"""
-    return await request_container.get(IKnowledgeBaseService)
-
-
 @pytest.fixture(scope="session")
 async def app(container: AsyncContainer) -> FastAPI:
     """Фикстура для создания тестового приложения FastAPI."""
@@ -149,7 +122,7 @@ async def app(container: AsyncContainer) -> FastAPI:
         application.include_router(base_router)
         application.include_router(semantic_search_router)
         application.include_router(taskmanager_router)
-        application.include_router(knowledge_base_router)
+
         return application
 
     return create_test_app()

@@ -6,7 +6,6 @@ from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi import FastAPI
 
 from app.api.v1.routers.base import router as base_router
-from app.api.v1.routers.knowledge_base import router as knowledge_base_router
 from app.api.v1.routers.semantic_search import router as semantic_search_router
 from app.api.v1.routers.taskmanager import router as taskmanager_router
 from app.common.logger import LoggerType
@@ -26,6 +25,7 @@ from app.settings.config import (
     MilvusSettings,
     RedisSettings,
     RestrictionSettings,
+    Settings,
     settings,
 )
 
@@ -58,13 +58,13 @@ def create_app() -> FastAPI:
             LoggerType: LoggerType.APP,
             RestrictionSettings: settings.restrictions,
             CelerySettings: settings.celery,
+            Settings: settings,
         },
     )
     setup_dishka(container, application)
     application.include_router(base_router)
     application.include_router(semantic_search_router)
     application.include_router(taskmanager_router)
-    application.include_router(knowledge_base_router)
     for exception, handler in exception_config.items():
         application.add_exception_handler(exception, handler)
     download_nltk_resources()

@@ -16,3 +16,6 @@ volumes
 venv
 __pycache__
 /tests/tmp
+celerybeat-schedule
+/models/
+/hf-cache/

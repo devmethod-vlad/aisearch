@@ -5,7 +5,9 @@ services:
       - .env
     volumes:
       - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
       - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
     ports:
       - ${APP_PORT}:${APP_PORT}
@@ -24,6 +26,8 @@ services:
     command: celery -A app.infrastructure.worker.celery_worker:worker worker --beat --loglevel=info --concurrency ${CELERY_WORKERS_NUM}
     volumes:
       - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
     env_file:
       - .env

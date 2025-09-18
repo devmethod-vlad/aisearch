@@ -32,9 +32,9 @@ class MilvusDatabase(IVectorDatabase):
             FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
         ]
         schema = CollectionSchema(fields, description=f"Collection {collection_name}")
-        self.collection = Collection(collection_name, schema)
+        collection = Collection(collection_name, schema)
         await asyncio.to_thread(
-            self.collection.create_index,
+            collection.create_index,
             "embedding",
             {
                 "metric_type": "COSINE",

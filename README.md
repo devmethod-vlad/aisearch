@@ -25,17 +25,6 @@
     APP_LOGS_HOST_PATH=./logs/app
     APP_LOGS_CONTR_PATH=/usr/src/logs/app
     APP_MODEL_NAME="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-    APP_KNOWLEDGE_BASE_MINITABLE_GOOGLE_LINK="https://docs.google.com/spreadsheets/d/13b7OQQW4galeI2tZc1XI43jzNch3gqwqP9HD0ofHoww/export?format=xlsx&gid=2126654700"
-    APP_KNOWLEDGE_BASE_MEGATABLE_GOOGLE_LINK="https://docs.google.com/spreadsheets/d/1yYgNQG__nw7GYIvbPRqDxygsf747KeXgp1f9Q3sjaCg/export?format=xlsx&gid=0"
-    APP_KNOWLEDGE_BASE_MAIN_HEADER_TEXT="База знаний"
-    APP_KNOWLEDGE_BASE_TARGET_COLUMNS="Номер знания;Актуально;2 линия;Роль;Компонент;Описание ошибки;Анализ ошибки;Шаблон ответа;Для пользователя;Jira"
-    APP_KNOWLEDGE_BASE_ROLES_SEPARATOR=";"
-    APP_KNOWLEDGE_BASE_COLLECT_DATA_TIME=12:05 # hh:mm
-    APP_CONFLUENCE_URL="https://wiki.mos.social"
-    APP_CONFLUENCE_TOKEN=<token>
-    APP_EDU_EMIAS_URL="https://edu.emias.ru"
-    APP_EDU_EMIAS_TOKEN=<token>
-    APP_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223777111
 
     GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
     GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn

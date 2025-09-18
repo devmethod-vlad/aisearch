@@ -3,50 +3,66 @@ from dishka import Provider, Scope, from_context, provide
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.common.storages.redis import RedisStorage
-from app.domain.adapters.confluence import ConfluenceAdapter
-from app.domain.adapters.edu import EduAdapter
-from app.domain.adapters.google import GoogleTablesAdapter
-from app.domain.adapters.interfaces import IConfluenceAdapter, IEduAdapter, IGoogleTablesAdapter
+from app.infrastructure.adapters.bm25 import BM25Adapter
+from app.infrastructure.adapters.cross_encoder import CrossEncoderAdapter
+from app.infrastructure.adapters.interfaces import (
+    IBM25WhooshAdapter,
+    ICrossEncoderAdapter,
+    ILLMQueue,
+    IMilvusDense,
+    IOpenSearchAdapter,
+    IRedisSemaphore,
+    IVLLMAdapter,
+)
+from app.infrastructure.adapters.llm_adapter import VLLMAdapter
+from app.infrastructure.adapters.milvus_dense import MilvusDense
+from app.infrastructure.adapters.open_search import OpenSearchAdapter
+from app.infrastructure.adapters.queue import LLMQueue
+from app.infrastructure.adapters.semaphore import RedisSemaphore
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.storages.milvus import MilvusDatabase
+from app.services.hybrid_search_service import HybridSearchService
 from app.services.interfaces import (
-    IKnowledgeBaseService,
+    IHybridSearchService,
     ISemanticSearchService,
     ITaskManagerService,
 )
-from app.services.knowledge_base import KnowledgeBaseService
 from app.services.semantic_search import SemanticSearchService
 from app.services.taskmanager import TaskManagerService
 from app.settings.config import (
     AppSettings,
     MilvusSettings,
     RestrictionSettings,
+    Settings,
 )
 
 
 class ApplicationProvider(Provider):
     """Провайдер зависимостей."""
 
+    settings = from_context(Settings, scope=Scope.APP)
     app_config = from_context(provides=AppSettings, scope=Scope.APP)
     milvus_config = from_context(provides=MilvusSettings, scope=Scope.APP)
     restrictions_config = from_context(provides=RestrictionSettings, scope=Scope.APP)
 
     logger = provide(AISearchLogger, scope=Scope.APP)
     redis_storage = provide(RedisStorage, scope=Scope.APP, provides=KeyValueStorageProtocol)
+    redis_semaphore = provide(RedisSemaphore, scope=Scope.APP, provides=IRedisSemaphore)
+    queue = provide(LLMQueue, scope=Scope.APP, provides=ILLMQueue)
+    vllm_client = provide(VLLMAdapter, scope=Scope.APP, provides=IVLLMAdapter)
+    os_adapter = provide(OpenSearchAdapter, scope=Scope.APP, provides=IOpenSearchAdapter)
+    bm25_adapter = provide(BM25Adapter, scope=Scope.APP, provides=IBM25WhooshAdapter)
+    cross_encoder_adapter = provide(
+        CrossEncoderAdapter, scope=Scope.REQUEST, provides=ICrossEncoderAdapter
+    )
     milvus_database = provide(MilvusDatabase, scope=Scope.REQUEST, provides=IVectorDatabase)
-    confluence_adapter = provide(
-        ConfluenceAdapter, scope=Scope.REQUEST, provides=IConfluenceAdapter
-    )
-    google_tables_adapter = provide(
-        GoogleTablesAdapter, scope=Scope.REQUEST, provides=IGoogleTablesAdapter
-    )
-    edu_adapter = provide(EduAdapter, scope=Scope.REQUEST, provides=IEduAdapter)
+    milvus_dense = provide(MilvusDense, scope=Scope.REQUEST, provides=IMilvusDense)
     semantic_search_service = provide(
         SemanticSearchService, scope=Scope.REQUEST, provides=ISemanticSearchService
     )
     taskmanager_service = provide(
         TaskManagerService, scope=Scope.REQUEST, provides=ITaskManagerService
     )
-    knowledge_base_service = provide(
-        KnowledgeBaseService, scope=Scope.REQUEST, provides=IKnowledgeBaseService
+    hybrid_search_service = provide(
+        HybridSearchService, scope=Scope.REQUEST, provides=IHybridSearchService
     )
