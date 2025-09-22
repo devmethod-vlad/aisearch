@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time
 import typing as tp
-import uuid
 
 from redis import WatchError
 from redis.asyncio import Redis
@@ -100,7 +99,6 @@ class LLMQueue(ILLMQueue):
 
         ticket_id = await self.redis.lpop(self.qkey)
 
-
         if not ticket_id:
             print("None ticket")
             return None
@@ -115,7 +113,9 @@ class LLMQueue(ILLMQueue):
             print("Хэш не найден или поле payload отсутствует:", hkey)
             return ticket_id, {}
 
-        payload = json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+        payload = (
+            json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+        )
         print(ticket_id, payload)
         return ticket_id, payload
 
@@ -124,7 +124,10 @@ class LLMQueue(ILLMQueue):
         data = await self.redis.hgetall(hkey)
         if not data:
             return {"state": "not_found"}
-        data = {k.decode(): (v.decode() if isinstance(v, (bytes, bytearray)) else v) for k, v in data.items()}
+        data = {
+            k.decode(): (v.decode() if isinstance(v, (bytes, bytearray)) else v)
+            for k, v in data.items()
+        }
 
         q_list = await self.redis.lrange(self.qkey, 0, -1)
         try:
@@ -149,10 +152,11 @@ class LLMQueue(ILLMQueue):
         if raw is None:
             print("RAW IS NONE")
             return ticket_id, {}
-        payload = json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+        payload = (
+            json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+        )
         return ticket_id, payload
 
     async def ack(self, ticket_id: str) -> None:
         """Подтверждение обработки: удаляем из processing."""
         await self.redis.lrem(self.pkey, 1, ticket_id)
-

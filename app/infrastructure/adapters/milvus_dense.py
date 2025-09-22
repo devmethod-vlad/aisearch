@@ -20,7 +20,7 @@ class MilvusDense(IMilvusDense):
     """
 
     def __init__(self, settings: Settings):
-        self.app_model_name = settings.milvus_dense.app_model_name
+        self.model_name = settings.milvus_dense.model_name
         self.host = settings.milvus_dense.host
         self.port = settings.milvus_dense.port
         self.collection_name = settings.milvus_dense.collection
@@ -36,7 +36,7 @@ class MilvusDense(IMilvusDense):
 
     def search(self, query: str, top_k: int) -> list[dict[str, Any]]:
         """Поиск"""
-        embedder = SentenceTransformer(self.app_model_name)
+        embedder = SentenceTransformer(self.model_name)
         vec = embedder.encode([query], normalize_embeddings=True)
         # параметры поиска можно настроить под тип индекса
         search_params = {"metric_type": "IP", "params": {"nprobe": 16}}

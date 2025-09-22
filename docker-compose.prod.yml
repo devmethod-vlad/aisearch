@@ -2,18 +2,74 @@ services:
   aisearch-app:
     build:
       context: .
-      dockerfile: Dockerfile_prod
+      dockerfile: Dockerfile_main
+      args:
+          https_proxy: ${HTTPS_PROXY}
+          http_proxy: ${HTTP_PROXY}
+          HTTPS_PROXY: ${HTTPS_PROXY}
+          HTTP_PROXY: ${HTTP_PROXY}
+          IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+          IMAGE_NAME: ${IMAGE_NAME}
+          IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+          REGISTRY: ${REGISTRY}
     networks:
       - default
       - service-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
 
   aisearch-celery-worker:
     build:
       context: .
-      dockerfile: Dockerfile_prod
+      dockerfile: Dockerfile_main
+      args:
+         https_proxy: ${HTTPS_PROXY}
+         http_proxy: ${HTTP_PROXY}
+         HTTPS_PROXY: ${HTTPS_PROXY}
+         HTTP_PROXY: ${HTTP_PROXY}
+         IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+         IMAGE_NAME: ${IMAGE_NAME}
+         IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+         REGISTRY: ${REGISTRY}
     networks:
       - default
       - service-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+  aisearch-etcd:
+    networks:
+      - default
+
+  aisearch-minio:
+    networks:
+      - default
+
+  aisearch-milvus:
+    networks:
+      - default
+
+  attu:
+    networks:
+      - default
+
+  aisearch-opensearch:
+    networks:
+      - default
+
+  aisearch-vllm:
+    networks:
+      - default
 
 networks:
   default:

@@ -3,8 +3,8 @@ ARG REGISTRY=localhost:5001
 # Dockerfile
 FROM ${REGISTRY}/${IMAGE_NAME_DEPS}
 
-ARG http_proxy
 ARG https_proxy
+ARG http_proxy
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
 
@@ -17,8 +17,6 @@ RUN uv pip compile pyproject.toml -o requirements.lock \
  && uv pip sync --system requirements.lock
 
 WORKDIR /backend
-COPY . /backend/
-
-ENV PYTHONPATH=/backend \
-    http_proxy='' https_proxy=''\
-    HTTPS_PROXY='' HTTP_PROXY=''
+ENV  http_proxy=''  https_proxy='' \
+     HTTP_PROXY='' HTTPS_PROXY='' \
+     PYTHONPATH=/backend

@@ -15,7 +15,8 @@ from sentence_transformers import SentenceTransformer
 from app.common.logger import AISearchLogger, LoggerType
 from app.common.storages.sync_redis import SyncRedisStorage
 from app.infrastructure.utils.nlp import download_nltk_resources
-from app.infrastructure.worker.scheduler import get_schedule_config
+
+# from app.infrastructure.worker.scheduler import get_schedule_config
 from app.settings.config import settings
 
 worker = Celery(__name__)
@@ -36,9 +37,8 @@ sync_redis_storage = SyncRedisStorage(client=redis.from_url(settings.redis.dsn))
 model: SentenceTransformer | None = None
 
 worker.autodiscover_tasks(["app.infrastructure.worker.tasks.semantic_search"])
-worker.autodiscover_tasks(["app.infrastructure.worker.tasks.knowledge_base"])
 
-worker.conf.beat_schedule = get_schedule_config()
+# worker.conf.beat_schedule = get_schedule_config()
 worker.conf.beat_max_loop_interval = 30
 worker.conf.beat_schedule_filename = "volumes/celerybeat-schedule"
 
@@ -74,8 +74,8 @@ def init_container_and_model() -> AsyncContainer:
     )
     logger = AISearchLogger(logger_type=LoggerType.CELERY)
 
-    logger.info(f"Выполняется загрузка модели {settings.app.model_name} ...")
-    model = SentenceTransformer(settings.app.model_name)
+    logger.info(f"Выполняется загрузка модели {settings.milvus_dense.model_name} ...")
+    model = SentenceTransformer(settings.milvus_dense.model_name)
     logger.info("Модель успешно загружена")
 
     logger.info("Выполняется загрузка ресурсов nltk ...")

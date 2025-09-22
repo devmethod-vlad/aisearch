@@ -89,8 +89,8 @@ def init_container_and_model() -> AsyncContainer:
         },
     )
     logger = AISearchLogger(logger_type=LoggerType.CELERY)
-    logger.info(f"Выполняется загрузка модели {settings.app.model_name} ...")
-    model = SentenceTransformer(settings.app.model_name)
+    logger.info(f"Выполняется загрузка модели {settings.milvus_dense.model_name} ...")
+    model = SentenceTransformer(settings.milvus_dense.model_name)
     logger.info("Модель успешно загружена")
     logger.info("Выполняется загрузка ресурсов nltk ...")
     download_nltk_resources()
@@ -177,16 +177,19 @@ def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any])
 @worker_process_shutdown.connect
 def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
     """Процесс после остановки воркера"""
-    global container,  drain_task
+    global container, drain_task
+
     async def _stop_drain() -> None:
         if drain_task:
             drain_task.cancel()
             with contextlib.suppress(Exception):
                 await drain_task
+
     async def _run() -> None:
         await _stop_drain()
         if container:
             vllm_client = await container.get(IVLLMAdapter)
             await vllm_client.close()
             await container.close()
+
     run_coroutine(_run())

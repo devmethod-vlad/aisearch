@@ -1,5 +1,13 @@
 FROM nvidia/cuda:12.8.0-devel-ubuntu22.04
-ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Moscow
+
+ARG https_proxy
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG HTTP_PROXY
+
+ENV DEBIAN_FRONTEND=noninteractive TZ=Europe/Moscow \
+    http_proxy=${https_proxy} https_proxy=${http_proxy}\
+    HTTPS_PROXY=${HTTPS_PROXY} HTTP_PROXY=${HTTP_PROXY}
 
 # тулчейн и заголовки для сборки CPython
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -24,10 +32,11 @@ RUN curl -fsSLO https://www.python.org/ftp/python/3.12.1/Python-3.12.1.tgz \
 
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 
-ENV UV_HTTP_TIMEOUT=300 \
-    PIP_DEFAULT_TIMEOUT=300 \
+ENV UV_HTTP_TIMEOUT=200 \
+    PIP_DEFAULT_TIMEOUT=200 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/root/.local/bin:${PATH}"
 
+ENV http_proxy='' https_proxy=''  HTTPS_PROXY=''  HTTP_PROXY=''
 CMD ["python3", "-V"]

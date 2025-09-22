@@ -1,15 +1,22 @@
 services:
   aisearch-app:
 #    docker tag localhost:5001/aisearch-app-dev-local:latest aisearch-app-dev-local:latest
-#    build:
-#      context: .
-#      dockerfile: Dockerfile_dev
-    image: localhost:5001/aisearch-app-dev-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile_main
+      args:
+          https_proxy: ${HTTPS_PROXY}
+          http_proxy: ${HTTP_PROXY}
+          HTTPS_PROXY: ${HTTPS_PROXY}
+          HTTP_PROXY: ${HTTP_PROXY}
+          IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+          IMAGE_NAME: ${IMAGE_NAME}
+          IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+          REGISTRY: ${REGISTRY}
+#    image: ${REGISTRY}/${IMAGE_NAME}
     healthcheck:
       disable: true
     shm_size: "4g"
-    environment:
-      PYTHONWARNINGS: "ignore::SyntaxWarning:whoosh\\..*"
     networks:
       - default
       - service-network
@@ -26,13 +33,22 @@ services:
       "
 
   aisearch-celery-worker:
-    image: localhost:5001/aisearch-app-dev-local:latest
+    build:
+      context: .
+      dockerfile: Dockerfile_main
+      args:
+          https_proxy: ${HTTPS_PROXY}
+          http_proxy: ${HTTP_PROXY}
+          HTTPS_PROXY: ${HTTPS_PROXY}
+          HTTP_PROXY: ${HTTP_PROXY}
+          IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+          IMAGE_NAME: ${IMAGE_NAME}
+          IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+          REGISTRY: ${REGISTRY}
     networks:
       - default
       - service-network
-    depends_on:
-      - aisearch-app
-      - aisearch-milvus
+
     shm_size: "4g"
     deploy:
       resources:
@@ -42,147 +58,29 @@ services:
               count: all
               capabilities: [ gpu ]
 
-  aisearch-beat:
-    image: localhost:5001/aisearch-app-dev-local:latest
-    container_name: aisearch-beat
-    volumes:
-      - ./:/backend
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
-      - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
-    env_file:
-      - .env
-    networks:
-      - default
-      - service-network
-    command: celery -A app.infrastructure.worker.celery_worker:worker beat --loglevel=INFO
-    depends_on:
-      - aisearch-celery-worker
-    restart: unless-stopped
-
   aisearch-etcd:
-    container_name: aisearch-etcd
-    image: quay.io/coreos/etcd:v3.5.18
-    env_file:
-      - .env
-    volumes:
-      - ./volumes/etcd:/etcd
-    command: etcd -advertise-client-urls=http://aisearch-etcd:${ETCD_PORT} -listen-client-urls http://0.0.0.0:${ETCD_PORT} --data-dir /etcd
     networks:
       - default
-    healthcheck:
-      test: "curl -f ${ETCD_HOST}:${ETCD_PORT}/health || exit 1"
-      interval: 30s
-      timeout: 20s
-      retries: 3
 
   aisearch-minio:
-    container_name: aisearch-minio
-    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
-    env_file:
-      - .env
-    ports:
-      - "${MINIO_WEB_UI_PORT}:${MINIO_WEB_UI_PORT}"
-      - "${MINIO_PORT}:${MINIO_PORT}"
-    volumes:
-      - ./volumes/minio:/minio_data
-    command: minio server /minio_data --console-address ":${MINIO_WEB_UI_PORT}"
     networks:
       - default
-    healthcheck:
-      test: "curl -f ${MINIO_HOST}:${MINIO_PORT}/minio/health/live || exit 1"
-      interval: 30s
-      timeout: 20s
-      retries: 3
 
   aisearch-milvus:
-    container_name: aisearch-milvus
-    image: milvusdb/milvus:v2.5.12
-    env_file:
-      - .env
-    command: ["milvus", "run", "standalone"]
-    security_opt:
-      - seccomp:unconfined
-    environment:
-      ETCD_ENDPOINTS: aisearch-etcd:${ETCD_PORT}
-      MINIO_ADDRESS: aisearch-minio:${MINIO_PORT}
-    volumes:
-      - ./volumes/milvus:/var/lib/milvus
     networks:
       - default
-    healthcheck:
-      test: "curl -f ${MILVUS_HOST}:${MILVUS_WEB_UI_PORT}/healthz || exit 1"
-      interval: 30s
-      start_period: 90s
-      timeout: 20s
-      retries: 3
-    ports:
-      - "${MILVUS_PORT}:${MILVUS_PORT}"
-      - "${MILVUS_WEB_UI_PORT}:${MILVUS_WEB_UI_PORT}"
-    depends_on:
-      - "aisearch-etcd"
-      - "aisearch-minio"
 
   attu:
-    image: zilliz/attu:v2.5.0
-    container_name: aisearch-attu
-    ports:
-      - "8010:3000"
-    depends_on:
-      - aisearch-milvus
+    networks:
+      - default
 
   aisearch-opensearch:
-    image: opensearchproject/opensearch:2.12.0
-    container_name: aisearch-opensearch
-    environment:
-      - discovery.type=single-node
-      - plugins.security.disabled=true
-      - DISABLE_INSTALL_DEMO_CONFIG=true
-      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
-    ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-    ports:
-      - "9200:9200"
     networks:
       - default
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:9200" ]
-      interval: 10s
-      timeout: 5s
-      retries: 30
 
-  vllm:
-    image: vllm/vllm-openai:latest
-    ports:
-      - "8000:8000"
-    volumes:
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ./hf-cache:/root/.cache/huggingface
-    env_file:
-      - .env
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - HF_HUB_OFFLINE=1             # жестко оффлайн, чтобы не лез в сеть
+  aisearch-vllm:
     networks:
       - default
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [ "gpu" ]
-              driver: nvidia
-              count: "all"
-    shm_size: "16g"
-    command: >
-      --model ${VLLM_MODEL}
-      --quantization awq
-      --served-model-name mistral-nemo-awq
-      --max-model-len 8192
-      --gpu-memory-utilization 0.92
-      --trust-remote-code
-      --port 8000
 
 networks:
   default:

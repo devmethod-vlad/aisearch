@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Self
 
 from pydantic import RedisDsn, model_validator
@@ -25,7 +26,7 @@ class AppSettings(EnvBaseSettings):
     logs_host_path: str
     logs_contr_path: str
 
-    model_name: str
+    modelstore_contr_path: str
 
     model_config = SettingsConfigDict(env_prefix="app_")
 
@@ -84,7 +85,8 @@ class VLLMSettings(EnvBaseSettings):
 
     base_url: str
     api_key: str | None = None
-    model: str
+    model: str | None = None
+    model_name: str
     max_input_tokens: int = 4096
     max_output_tokens: int = 512
     temperature: float = 0.7
@@ -184,7 +186,7 @@ class BM25Settings(EnvBaseSettings):
 class RerankerSettings(EnvBaseSettings):
     """Cross Encoder настройки"""
 
-    model_name: str = "BAAI/bge-reranker-v2-m3"
+    model_name: str
     device: str = "cpu"
     model_config = SettingsConfigDict(env_prefix="reranker_")
 
@@ -217,7 +219,7 @@ class MilvusDenseSettings(EnvBaseSettings):
     vector_field: str = "embedding"
     id_field: str = "ext_id"
     output_fields: str = "ext_id,question,analysis,answer"
-    app_model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+    model_name: str
     model_config = SettingsConfigDict(env_prefix="milvus_")
 
 
@@ -239,6 +241,15 @@ class Settings(EnvBaseSettings):
     reranker: RerankerSettings = RerankerSettings()
     milvus_dense: MilvusDenseSettings = MilvusDenseSettings()
     warmup: WarmupSettings = WarmupSettings()
+
+    @model_validator(mode="after")
+    def _fill_vllm_model(self) -> Self:
+        if not (getattr(self.vllm, "model", None)):
+            base = getattr(self.app, "modelstore_contr_path", None)
+            name = getattr(self.vllm, "model_name", None)
+            if base and name:
+                self.vllm.model = str(Path(base) / name)
+        return self
 
 
 settings = Settings()
