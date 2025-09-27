@@ -3,13 +3,13 @@ from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app.api.v1.dto.responses.taskmanager import TaskQueryResponse
+from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.services.interfaces import IHybridSearchService
 
 router = APIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
 
 
-@router.post("/documents", response_model=TaskQueryResponse)
+@router.post("/search", response_model=TaskResponse)
 @inject
 async def get_documents(
     query: str,
@@ -21,7 +21,7 @@ async def get_documents(
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 
 
-@router.post("/generate", response_model=TaskQueryResponse)
+@router.post("/generate", response_model=TaskResponse)
 @inject
 async def generate_answer(
     query: str,
@@ -34,7 +34,7 @@ async def generate_answer(
     return JSONResponse(content=jsonable_encoder(response, exclude_none=True), status_code=202)
 
 
-@router.get("/task/{ticket_id}", response_model=TaskQueryResponse)
+@router.get("/info/{ticket_id}", response_model=TaskResponse)
 @inject
 async def get_task_status(
     ticket_id: str,
