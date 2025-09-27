@@ -12,7 +12,7 @@
 Для запуска проекта файл`.env` должен содержать следующие параметры:
 
     COMPOSE_PATH_SEPARATOR=';'
-    COMPOSE_FILE='docker-compose.yml;docker-compose.dev.yml;docker-compose.gpu.yml'
+    COMPOSE_FILE='docker-compose.yml;docker-compose.dev.yml'
 
     HTTPS_PROXY=''
     HTTP_PROXY=''
@@ -23,19 +23,17 @@
 
     APP_MODE=dev
     APP_HOST=0.0.0.0
-    APP_PORT=8000
+    APP_PORT=5155
     APP_DEBUG_HOST=0.0.0.0
     APP_DEBUG_PORT=5678
     APP_WORKERS_NUM=2
     APP_ACCESS_KEY=123
-    APP_PREFIX=/some/prefix
+    APP_PREFIX=
     APP_LOGS_HOST_PATH=./logs/app
     APP_LOGS_CONTR_PATH=/usr/src/logs/app
-    APP_MODELSTORE_HOST_PATH=./models
-    APP_MODELSTORE_CONTR_PATH=/usr/src/models
 
-    BM25_INDEX_PATH_HOST=./bm25index
-    BM25_INDEX_PATH=/usr/src/bm25index
+    APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
+    APP_MODELSTORE_CONTR_PATH=/usr/src/models
 
     GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
     GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn
@@ -60,33 +58,108 @@
 
     MILVUS_HOST=aisearch-milvus
     MILVUS_PORT=19530
+    MILVUS_USE_SSL=false
     MILVUS_WEB_UI_PORT=9091
-    MILVUS_NLIST=128
-    MILVUS_NPROBE=10
-    MILVUS_LOAD_TIMEOUT=10 # секунды
-    MILVUS_QUERY_TIMEOUT=2 # секунды
+    MILVUS_CONNECTION_TIMEOUT=120
+    MILVUS_QUERY_TIMEOUT=30
+    MILVUS_PRELOADED_COLLECTION_NAMES=med_rag,kb_default
+    MILVUS_RECREATE_COLLECTION=false
+    MILVUS_VECTOR_FIELD=embedding
+    MILVUS_ID_FIELD=pk
+    MILVUS_OUTPUT_FIELDS=ext_id,question,analysis,answer
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
 
-    REDIS_HOSTNAME=aisearch-redis
+    # === Очередь LLM (для отложенной генерации, если нет слота семафора) ===
+    LLM_QUEUE_LIST_KEY=llm:queue:list
+    LLM_QUEUE_TICKET_HASH_PREFIX=llm:ticket:
+    LLM_QUEUE_MAX_SIZE=10
+    LLM_QUEUE_TICKET_TTL=3600
+    LLM_QUEUE_DRAIN_INTERVAL_SEC=1
+
+    # === Переключатели поиска ===
+    SEARCH_USE_HYBRID=true        # если false -> только dense + (опц.) reranker
+    SEARCH_USE_OPENSEARCH=true    # взаимоисключимо с BM25 (приоритет OS)
+    SEARCH_USE_BM25=false
+    SEARCH_USE_RERANKER=true
+
+    # === Параметры гибридного склейщика ===
+    HYBRID_DENSE_TOP_K=20
+    HYBRID_LEX_TOP_K=50
+    HYBRID_TOP_K=5
+    HYBRID_W_CE=0.6
+    HYBRID_W_DENSE=0.25
+    HYBRID_W_LEX=0.15
+    HYBRID_DENSE_THRESHOLD=0.0
+    HYBRID_LEX_THRESHOLD=0.0
+    HYBRID_CE_THRESHOLD=0.0
+    HYBRID_CACHE_TTL=3600
+    HYBRID_VERSION=v1
+    HYBRID_COLLECTION_NAME=kb_default
+
+    # === OpenSearch ===
+    OS_HOST=aisearch-opensearch
+    OS_PORT=9200
+    OS_INDEX_NAME=kb_lex_ru
+    OS_USE_SSL=false
+    OS_VERIFY_CERTS=false
+    OS_USER=
+    OS_PASSWORD=
+    # OS_QUERY_PROFILE=fast
+    # OS_QUERY_FIELDS=question,analysis,answer
+    OS_OPERATOR=or
+    OS_MIN_SHOULD_MATCH=1
+    OS_FUZZINESS=0
+    OS_USE_RESCORE=false
+    OS_INDEX_ANSWER=true
+    OS_BULK_CHUNK_SIZE=1000
+    OS_RECREATE_INDEX=true
+
+    # === BM25 (Whoosh) ===
+    BM25_INDEX_PATH_HOST=C:/Users/omka/models/1
+    BM25_INDEX_PATH=/usr/src/bm25index
+    BM25_SCHEMA_FIELDS=question,analysis,answer
+    BM25_RECREATE_INDEX=false
+
+    REDIS_HOSTNAME=redis
     REDIS_PORT=6379
-    REDIS_DATABASE=4
+    REDIS_DATABASE=7
 
     REDISINSIGHT_PORT=6399
-
-    RESTRICT_MAX_CACHE_TTL=    # секунды
-    RESTRICT_QUEUE_KEY=celery:pending-tasks-ids
-    RESTRICT_BASE_CACHE_KEY=celery:cache-result
-
-    RESTRICT_SEMANTIC_SEARCH_LAST_QUERY_TIME_KEY=celery:semantic-search:last-query-time
-    RESTRICT_SEMANTIC_SEARCH_TIMEOUT_INTERVAL=2 # секунды
-    RESTRICT_SEMANTIC_SEARCH_QUEUE_SIZE=3
 
     CELERY_LOGS_HOST_PATH=./logs/celery
     CELERY_LOGS_CONTR_PATH=/usr/src/logs/celery
     CELERY_WORKERS_NUM=2
 
+    # === Глобальный семафор (общий лимит конкаренси для поиска и генерации) ===
+    LLM_GLOBAL_SEM_REDIS_DSN="redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}"
+    LLM_GLOBAL_SEM_KEY=llm:{global}:sem
+    LLM_GLOBAL_SEM_LIMIT=2
+    LLM_GLOBAL_SEM_TTL_MS=120000
+    LLM_GLOBAL_SEM_WAIT_TIMEOUT_MS=30000
+    LLM_GLOBAL_SEM_HEARTBEAT_MS=30000
+
+    # === CrossEncoder (reranker) ===
+    RERANKER_DEVICE=cuda   # или cuda
+
+    # === vLLM (локальный OpenAI-совместимый сервер) ===
+    VLLM_BASE_URL=http://aisearch-vllm:8000/v1
+    VLLM_PORT=8003
+    VLLM_API_KEY=local-dev
     VLLM_MODEL_SERVED_NAME=mistral-nemo-awq
+    VLLM_MAX_INPUT_TOKENS=4096
+    VLLM_MAX_OUTPUT_TOKENS=512
+    VLLM_TEMPERATURE=0.7
+    VLLM_TOP_P=0.9
+    VLLM_REQUEST_TIMEOUT=60
+    VLLM_STREAM=false
+    VLLM_MODEL_NAME=Llama-3.2-1B-Instruct-NEO-SI-FI-GGUF/Llama-3.2-1B-Instruct-NEO-SI-FI-Q4_K_M-imat.gguf
+    VLLM_GPU_MEMORY_UTILIZATION=0.6
+
+    # === Прогрев эмбеддера/реранкера при старте ===
+    WARMUP_ENABLED=true
+    WARMUP_CE_PAIRS="Как оформить доступ в систему?||Как оформить доступ врача в систему?;Запись к врачу||Как записаться к врачу"
+    WARMUP_EMBED_TEXTS="Пример вопроса один;Пример вопроса два"
 
 ## Сборка образов
 Для ускорения процесса работы разделим сборку на три образа:

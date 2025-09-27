@@ -29,7 +29,7 @@ services:
     container_name: aisearch-celery-worker
     command: >
       sh -c "
-        celery -A app.infrastructure.worker.worker:worker worker --beat --loglevel=info --concurrency ${CELERY_WORKERS_NUM}
+        celery -A app.infrastructure.worker.worker:worker worker --loglevel=info --concurrency ${CELERY_WORKERS_NUM}
       "
     volumes:
       - ./:/backend
@@ -154,7 +154,7 @@ services:
       --model ${APP_MODELSTORE_CONTR_PATH}/${VLLM_MODEL_NAME}
       --quantization awq
       --served-model-name ${VLLM_MODEL_SERVED_NAME}
-      --max-model-len 3096
-      --gpu-memory-utilization 0.85
+      --max-model-len ${VLLM_MAX_INPUT_TOKENS}
+      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION}
       --trust-remote-code
-      --port 8000
+      --port ${VLLM_PORT}

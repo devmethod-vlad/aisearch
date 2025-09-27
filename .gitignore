@@ -19,3 +19,6 @@ __pycache__
 celerybeat-schedule
 /models/
 /hf-cache/
+bm25index
+poetry.lock
+*.xlsx

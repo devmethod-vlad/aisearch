@@ -16,6 +16,10 @@ class MilvusCollectionLoadTimeoutError(Exception):
     pass
 
 
+class MilvusDeletionTimeoutError(Exception):
+    """Ошибка ожидания удаления коллекци"""
+
+
 class RequestError(Exception):
     """Ошибка запроса"""
 

@@ -1,76 +1,83 @@
-import os
-from collections.abc import Iterable
-from typing import Any
+import pickle
+import typing as tp
 
-from whoosh import index
-from whoosh.analysis import StemmingAnalyzer
-from whoosh.fields import ID, TEXT, Schema
-from whoosh.qparser import MultifieldParser
+import numpy as np
+import pandas as pd
+from rank_bm25 import BM25Okapi
 
-from app.infrastructure.adapters.interfaces import IBM25WhooshAdapter
+from app.common.logger import AISearchLogger
+from app.infrastructure.adapters.interfaces import IBM25Adapter
+from app.infrastructure.utils.nlp import normalize_query
 from app.settings.config import Settings
 
 
-class BM25Adapter(IBM25WhooshAdapter):
-    """Адаптер bm25 на whoosh"""
+class BM25Adapter(IBM25Adapter):
+    """Адаптер bm25 на rank_bm25"""
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, logger: AISearchLogger):
         self.index_path = settings.bm25.index_path
         self.schema_fields = settings.bm25.schema_fields
-        self._ix = None
-        self._ensure_index()
+        self._ix: BM25Okapi | None = None
+        self._data: pd.DataFrame | None = None
+        self.ensure_index()
+        self.logger = logger
 
-    def _ensure_index(self) -> None:
-        os.makedirs(self.index_path, exist_ok=True)
-        if not index.exists_in(self.index_path):
-            schema = Schema(
-                ext_id=ID(stored=True, unique=True),
-                question=TEXT(stored=True, analyzer=StemmingAnalyzer()),
-                analysis=TEXT(stored=True, analyzer=StemmingAnalyzer()),
-                answer=TEXT(stored=True, analyzer=StemmingAnalyzer()),
+    @staticmethod
+    def build_index(
+        data: pd.DataFrame, index_path: str, texts: list[str], logger: AISearchLogger
+    ) -> None:
+        """Построение индекса"""
+        logger.info("Построение индекса BM25 ...")
+
+        tokenized_corpus = [normalize_query(t) for t in texts]
+
+        with open(f"{index_path}/bm25.pkl", "wb") as f:
+            pickle.dump(
+                {
+                    "bm25": BM25Okapi(tokenized_corpus),
+                    "tokenized_corpus": tokenized_corpus,
+                },
+                f,
             )
-            self._ix = index.create_in(self.index_path, schema)
-        else:
-            self._ix = index.open_dir(self.index_path)
 
-    def rebuild(self, documents: Iterable[dict[str, Any]]) -> None:
-        """Полная пересборка индекса.
-        documents: iterable словарей {"ext_id","question","analysis","answer"}
-        """
-        if self._ix is None:
-            self._ensure_index()
-        writer = self._ix.writer(limitmb=512, procs=1, multisegment=True)
-        try:
-            for doc in documents:
-                writer.update_document(
-                    ext_id=str(doc.get("ext_id", "")),
-                    question=str(doc.get("question", "")),
-                    analysis=str(doc.get("analysis", "")),
-                    answer=str(doc.get("answer", "")),
-                )
-        finally:
-            writer.commit()
+        data.to_parquet(f"{index_path}/rows.parquet")
+        logger.info("Индекс BM25 построен")
 
-    def search(self, query: str, top_k: int = 50) -> list[dict[str, Any]]:
+    def ensure_index(self) -> None:
+        """Подгрузка индекса"""
+        with open(f"{self.index_path}/bm25.pkl", "rb") as f:
+            bm25_pack = pickle.load(f)
+        self._ix = bm25_pack["bm25"]
+        self._data = pd.read_parquet(f"{self.index_path}/rows.parquet")
+
+    def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
         """Возвращает список кандидатов:
         [{"ext_id","question","analysis","answer","score_bm25","source":"bm25"}, ...]
         """
-        if self._ix is None:
-            self._ensure_index()
-        fields = [f for f in self.schema_fields if f in ("question", "analysis", "answer")]
-        parser = MultifieldParser(fields, schema=self._ix.schema)
-        q = parser.parse(query)
-        results: list[dict[str, Any]] = []
-        with self._ix.searcher() as s:
-            hits = s.search(q, limit=top_k)
-            for h in hits:
-                results.append(
-                    {
-                        "ext_id": h.get("ext_id"),
-                        "question": h.get("question"),
-                        "analysis": h.get("analysis"),
-                        "answer": h.get("answer"),
-                        "score_bm25": float(h.score),
-                        "source": "bm25",
-                    }
-                )
+        scores = self._ix.get_scores(query)
+        idxs = np.argsort(scores)[::-1][:top_k]
+        hits = [(int(i), float(scores[i])) for i in idxs]
+        results: list[dict[str, tp.Any]] = []
+        seen = set()
+
+        data_columns = list(self._data.columns)
+
+        for ridx, s in hits:
+            if ridx in seen:
+                continue
+            seen.add(ridx)
+            r = self._data.loc[ridx]
+
+            result_item = {}
+            for col in data_columns:
+                result_item[col] = str(r.get(col, "") if hasattr(r, "get") else getattr(r, col, ""))
+
+            result_item["score_bm25"] = float(s)  # type: ignore
+            result_item["source"] = "bm25"
+
+            results.append(result_item)
+
+            if len(results) >= top_k:
+                break
+
+        return results

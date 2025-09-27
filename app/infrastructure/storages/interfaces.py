@@ -1,7 +1,7 @@
 import abc
 import typing as tp
 
-from pymilvus import Collection
+import pandas as pd
 from sentence_transformers import SentenceTransformer
 
 
@@ -57,8 +57,8 @@ class IVectorDatabase(abc.ABC):
         """Инициализация коллекции для метаданных модели."""
 
     @abc.abstractmethod
-    async def load_collection_and_wait(self, collection_name: str) -> Collection:
-        """Загрузка коллекции."""
+    def preload_collections(self) -> None:
+        """Предзагрузка коллекций в память"""
 
     @abc.abstractmethod
     async def get_model_metadata(self, limit: int) -> list[dict[str, tp.Any]]:
@@ -71,12 +71,15 @@ class IVectorDatabase(abc.ABC):
         """Индексация документов в vector_db."""
 
     @abc.abstractmethod
-    async def ensure_model_consistency(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
-    ) -> bool:
-        """Гарантирует актуальность связи коллекция -> модель
-        Возвращает True, если модель была изменена
-        """
+    async def ensure_collection(
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: pd.DataFrame | None,
+        recreate: bool,
+    ) -> None:
+        """Гарантирует готовность коллекции (актуальная модель) и пересоздаёт при необходимости"""
 
     @abc.abstractmethod
     async def initialize_collection(
@@ -85,7 +88,5 @@ class IVectorDatabase(abc.ABC):
         """Инициализация коллекции с текущей моделью."""
 
     @abc.abstractmethod
-    async def handle_model_change(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
-    ) -> None:
-        """Обработка смены модели."""
+    async def close(self) -> None:
+        """Закрытие соединения с клиентом."""

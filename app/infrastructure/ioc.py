@@ -6,33 +6,30 @@ from app.common.storages.redis import RedisStorage
 from app.infrastructure.adapters.bm25 import BM25Adapter
 from app.infrastructure.adapters.cross_encoder import CrossEncoderAdapter
 from app.infrastructure.adapters.interfaces import (
-    IBM25WhooshAdapter,
+    IBM25Adapter,
     ICrossEncoderAdapter,
     ILLMQueue,
-    IMilvusDense,
     IOpenSearchAdapter,
     IRedisSemaphore,
     IVLLMAdapter,
 )
 from app.infrastructure.adapters.llm_adapter import VLLMAdapter
-from app.infrastructure.adapters.milvus_dense import MilvusDense
 from app.infrastructure.adapters.open_search import OpenSearchAdapter
 from app.infrastructure.adapters.queue import LLMQueue
 from app.infrastructure.adapters.semaphore import RedisSemaphore
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.storages.milvus import MilvusDatabase
+from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 from app.services.hybrid_search_service import HybridSearchService
 from app.services.interfaces import (
+    IHybridSearchOrchestrator,
     IHybridSearchService,
-    ISemanticSearchService,
     ITaskManagerService,
 )
-from app.services.semantic_search import SemanticSearchService
 from app.services.taskmanager import TaskManagerService
 from app.settings.config import (
     AppSettings,
     MilvusSettings,
-    RestrictionSettings,
     Settings,
 )
 
@@ -43,7 +40,6 @@ class ApplicationProvider(Provider):
     settings = from_context(Settings, scope=Scope.APP)
     app_config = from_context(provides=AppSettings, scope=Scope.APP)
     milvus_config = from_context(provides=MilvusSettings, scope=Scope.APP)
-    restrictions_config = from_context(provides=RestrictionSettings, scope=Scope.APP)
 
     logger = provide(AISearchLogger, scope=Scope.APP)
     redis_storage = provide(RedisStorage, scope=Scope.APP, provides=KeyValueStorageProtocol)
@@ -51,18 +47,18 @@ class ApplicationProvider(Provider):
     queue = provide(LLMQueue, scope=Scope.APP, provides=ILLMQueue)
     vllm_client = provide(VLLMAdapter, scope=Scope.APP, provides=IVLLMAdapter)
     os_adapter = provide(OpenSearchAdapter, scope=Scope.APP, provides=IOpenSearchAdapter)
-    bm25_adapter = provide(BM25Adapter, scope=Scope.APP, provides=IBM25WhooshAdapter)
+    bm25_adapter = provide(BM25Adapter, scope=Scope.APP, provides=IBM25Adapter)
     cross_encoder_adapter = provide(
-        CrossEncoderAdapter, scope=Scope.REQUEST, provides=ICrossEncoderAdapter
+        CrossEncoderAdapter, scope=Scope.APP, provides=ICrossEncoderAdapter
     )
-    milvus_database = provide(MilvusDatabase, scope=Scope.REQUEST, provides=IVectorDatabase)
-    milvus_dense = provide(MilvusDense, scope=Scope.REQUEST, provides=IMilvusDense)
-    semantic_search_service = provide(
-        SemanticSearchService, scope=Scope.REQUEST, provides=ISemanticSearchService
-    )
+    milvus_database = provide(MilvusDatabase, scope=Scope.APP, provides=IVectorDatabase)
+
     taskmanager_service = provide(
         TaskManagerService, scope=Scope.REQUEST, provides=ITaskManagerService
     )
     hybrid_search_service = provide(
         HybridSearchService, scope=Scope.REQUEST, provides=IHybridSearchService
+    )
+    hybrid_search_orchestrator = provide(
+        HybridSearchOrchestrator, scope=Scope.APP, provides=IHybridSearchOrchestrator
     )

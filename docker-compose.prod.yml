@@ -15,13 +15,6 @@ services:
     networks:
       - default
       - service-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
 
   aisearch-celery-worker:
     build:

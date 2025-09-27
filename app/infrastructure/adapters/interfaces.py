@@ -1,9 +1,11 @@
 import abc
 import typing as tp
-from collections.abc import Iterable
 
 import numpy as np
+import pandas as pd
 import torch
+
+from app.common.logger import AISearchLogger
 
 
 class IRedisSemaphore(abc.ABC):
@@ -89,18 +91,27 @@ class IOpenSearchAdapter(abc.ABC):
     """Адаптер OpenSearch"""
 
     @abc.abstractmethod
+    def build_index(self, data: pd.DataFrame) -> None:
+        """Построение индекса"""
+
+    @abc.abstractmethod
     def search(self, body: dict, size: int) -> list[dict]:
         """Поиск opensearch"""
 
 
-class IBM25WhooshAdapter(abc.ABC):
+class IBM25Adapter(abc.ABC):
     """Адаптер кросс-энкодера"""
 
+    @staticmethod
     @abc.abstractmethod
-    def rebuild(self, documents: Iterable[dict[str, tp.Any]]) -> None:
-        """Полная пересборка индекса.
-        documents: iterable словарей {"ext_id","question","analysis","answer"}
-        """
+    def build_index(
+        data: pd.DataFrame, index_path: str, texts: list[str], logger: AISearchLogger
+    ) -> None:
+        """Построение индекса"""
+
+    @abc.abstractmethod
+    def ensure_index(self) -> None:
+        """Подгрузка индекса"""
 
     @abc.abstractmethod
     def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
@@ -115,11 +126,3 @@ class ICrossEncoderAdapter(abc.ABC):
     @abc.abstractmethod
     def rank(self, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
         """Реранжирование"""
-
-
-class IMilvusDense(abc.ABC):
-    """Интерфейс Milvus"""
-
-    @abc.abstractmethod
-    def search(self, query: str, top_k: int) -> list[dict[str, tp.Any]]:
-        """Поиск"""

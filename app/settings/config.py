@@ -1,3 +1,4 @@
+import typing as tp
 from pathlib import Path
 from typing import Self
 
@@ -26,8 +27,6 @@ class AppSettings(EnvBaseSettings):
     logs_host_path: str
     logs_contr_path: str
 
-    modelstore_contr_path: str
-
     model_config = SettingsConfigDict(env_prefix="app_")
 
 
@@ -36,10 +35,26 @@ class MilvusSettings(EnvBaseSettings):
 
     host: str
     port: int
-    nlist: int
-    nprobe: int
-    load_timeout: int
+    use_ssl: bool = False
+    connection_timeout: int
     query_timeout: int
+    preloaded_collection_names: str | list[str]
+    model_name: str
+    recreate_collection: bool = False
+    vector_field: str = "embedding"
+    id_field: str = "ext_id"
+    output_fields: str | list[str] = (
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+    )
+
+    @model_validator(mode="after")
+    def assemble_milvus_settings(self) -> tp.Self:
+        """Досборка настроек MilvusDB"""
+        if isinstance(self.preloaded_collection_names, str):
+            self.preloaded_collection_names = self.preloaded_collection_names.split(",")
+        if isinstance(self.output_fields, str):
+            self.output_fields = self.output_fields.split(",")
+        return self
 
     model_config = SettingsConfigDict(env_prefix="milvus_")
 
@@ -66,24 +81,11 @@ class RedisSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="redis_")
 
 
-class RestrictionSettings(EnvBaseSettings):
-    """Настройки ограничителей запросов, очередей, кэша"""
-
-    queue_key: str = "celery:pending-tasks-ids"
-    base_cache_key: str = "celery:cache-result"
-    max_cache_ttl: int
-
-    semantic_search_last_query_time_key: str = "celery:semantic-search:last-query-time"
-    semantic_search_timeout_interval: int
-    semantic_search_queue_size: int
-
-    model_config = SettingsConfigDict(env_prefix="restrict_")
-
-
 class VLLMSettings(EnvBaseSettings):
     """Настройки клиента LLM"""
 
     base_url: str
+    port: int
     api_key: str | None = None
     model: str | None = None
     model_name: str
@@ -94,13 +96,6 @@ class VLLMSettings(EnvBaseSettings):
     request_timeout: int = 60
     stream: bool = False
     model_config = SettingsConfigDict(env_prefix="vllm_")
-
-
-class ConcurrencySettings(EnvBaseSettings):
-    """Настройки параллельности локально"""
-
-    local_llm_sem: int = 2
-    model_config = SettingsConfigDict(env_prefix="concurrency_")
 
 
 class HybridSearchSettings(EnvBaseSettings):
@@ -117,16 +112,17 @@ class HybridSearchSettings(EnvBaseSettings):
     ce_threshold: float = 0.0
     cache_ttl: int = 3600
     version: str = "v1"
+    collection_name: str = "kb_default"
     model_config = SettingsConfigDict(env_prefix="hybrid_")
 
 
 class SearchSwitches(EnvBaseSettings):
     """Настройки переключателей поиска"""
 
-    use_opensearch: bool = True
-    use_bm25: bool = False
-    use_reranker: bool = True
-    use_hybrid: bool = True  # общий выключатель гибрида
+    use_opensearch: bool
+    use_bm25: bool
+    use_reranker: bool
+    use_hybrid: bool
     model_config = SettingsConfigDict(env_prefix="search_")
 
 
@@ -165,12 +161,15 @@ class OpenSearchSettings(EnvBaseSettings):
     verify_certs: bool = False
     user: str | None = None
     password: str | None = None
-    query_profile: str = "fast"
-    query_fields: str = "question,analysis,answer"
+    # query_profile: str = "fast"
+    # query_fields: str = "question,analysis,answer"
     operator: str = "or"
     min_should_match: int = 1
     fuzziness: int = 0
     use_rescore: bool = False
+    index_answer: bool = True
+    bulk_chunk_size: int = 1000
+    recreate_index: bool = True
     model_config = SettingsConfigDict(env_prefix="os_")
 
 
@@ -180,6 +179,7 @@ class BM25Settings(EnvBaseSettings):
     engine: str = "whoosh"
     index_path: str = "/data/bm25_index"
     schema_fields: str = "question,analysis,answer"
+    recreate_index: bool = False
     model_config = SettingsConfigDict(env_prefix="bm25_")
 
 
@@ -210,37 +210,22 @@ class CelerySettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="celery_")
 
 
-class MilvusDenseSettings(EnvBaseSettings):
-    """Настройки Milvus"""
-
-    host: str = "aisearch-milvus"
-    port: int = 19530
-    collection: str = "kb_default"
-    vector_field: str = "embedding"
-    id_field: str = "ext_id"
-    output_fields: str = "ext_id,question,analysis,answer"
-    model_name: str
-    model_config = SettingsConfigDict(env_prefix="milvus_")
-
-
 class Settings(EnvBaseSettings):
     """Настройки проекта."""
 
     app: AppSettings = AppSettings()
     milvus: MilvusSettings = MilvusSettings()
     redis: RedisSettings = RedisSettings()
-    restrictions: RestrictionSettings = RestrictionSettings()
     celery: CelerySettings = CelerySettings()
     vllm: VLLMSettings = VLLMSettings()
     hybrid: HybridSearchSettings = HybridSearchSettings()
-    search: SearchSwitches = SearchSwitches()
     llm_queue: LLMQueueSettings = LLMQueueSettings()
     llm_global_sem: LLMGlobalSemaphoreSettings = LLMGlobalSemaphoreSettings()
     opensearch: OpenSearchSettings = OpenSearchSettings()
     bm25: BM25Settings = BM25Settings()
     reranker: RerankerSettings = RerankerSettings()
-    milvus_dense: MilvusDenseSettings = MilvusDenseSettings()
     warmup: WarmupSettings = WarmupSettings()
+    switches: SearchSwitches = SearchSwitches()
 
     @model_validator(mode="after")
     def _fill_vllm_model(self) -> Self:

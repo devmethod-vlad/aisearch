@@ -11,12 +11,10 @@ from pydantic import RedisDsn
 from testcontainers.redis import RedisContainer
 
 from app.api.v1.routers.base import router as base_router
-from app.api.v1.routers.semantic_search import router as semantic_search_router
 from app.api.v1.routers.taskmanager import router as taskmanager_router
 from app.common.logger import LoggerType
 from app.infrastructure.ioc import ApplicationProvider
 from app.infrastructure.providers import AuthProvider, LoggerProvider, RedisProvider
-from app.services.interfaces import ISemanticSearchService
 from app.settings.config import (
     AppSettings,
     RedisSettings,
@@ -69,10 +67,6 @@ def settings(redis_container: RedisContainer) -> Settings:
             debug_port=8001,
             workers_num=1,
             prefix="",
-            confluence_url="https://edu.emias.ru",
-            edu_emias_url="https://edu.emias.ru",
-            knowledge_base_minitable_google_link="minitable",
-            knowledge_base_megatable_google_link="megatable",
         ),
         redis=RedisSettings(port=redis_port, dsn=RedisDsn(f"redis://{redis_host}:{redis_port}")),
     )
@@ -105,12 +99,6 @@ async def request_container(container: AsyncContainer) -> AsyncGenerator[AsyncCo
         yield request_container
 
 
-@pytest.fixture
-async def semantic_search_service(request_container: AsyncContainer) -> ISemanticSearchService:
-    """Сервис семантического поиска"""
-    return await request_container.get(ISemanticSearchService)
-
-
 @pytest.fixture(scope="session")
 async def app(container: AsyncContainer) -> FastAPI:
     """Фикстура для создания тестового приложения FastAPI."""
@@ -120,7 +108,6 @@ async def app(container: AsyncContainer) -> FastAPI:
         application = FastAPI(title="Auth Service")
         setup_dishka(container, application)
         application.include_router(base_router)
-        application.include_router(semantic_search_router)
         application.include_router(taskmanager_router)
 
         return application

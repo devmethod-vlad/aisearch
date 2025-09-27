@@ -4,9 +4,8 @@ import re
 import unicodedata
 
 import nltk
+import numpy as np
 import pymorphy3
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
 
 
 def download_nltk_resources() -> None:
@@ -24,17 +23,6 @@ def download_nltk_resources() -> None:
                 nltk.download(resource_name)
 
 
-# temporal
-def get_documents() -> list[str]:
-    """Получить тестовый набор документов"""
-    return [
-        "Машинное обучение — это область искусственного интеллекта.",
-        "Нейронные сети используются для обработки больших объемов данных.",
-        "Python — популярный язык программирования для анализа данных.",
-        "Русский язык — один из самых сложных языков мира.",
-    ]
-
-
 def hash_query(normalized_query: str) -> str:
     """Хеширование нормализованного запроса"""
     return hashlib.md5(normalized_query.encode("utf-8")).hexdigest()
@@ -42,10 +30,11 @@ def hash_query(normalized_query: str) -> str:
 
 def normalize_query(query: str) -> str:
     """Нормализация запроса"""
+    from nltk.corpus import stopwords
+    from nltk.tokenize import word_tokenize
+
     morph = pymorphy3.MorphAnalyzer()
-
     stop_words = set(stopwords.words("russian"))
-
     text = query.strip().replace("\xa0", " ").replace("\n", " ")
 
     text = re.sub(r"\s+", " ", text)
@@ -66,3 +55,11 @@ def normalize_query(query: str) -> str:
 
     unique_tokens = sorted(set(normalized_tokens))
     return " ".join(unique_tokens)
+
+
+def l2_normalize(vec: np.ndarray) -> np.ndarray:
+    """Нормализация вектора"""
+    n = np.linalg.norm(vec)
+    if n == 0:
+        return vec
+    return vec / n

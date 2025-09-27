@@ -1,224 +1,411 @@
 import asyncio
 import typing as tp
 
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
-from pymilvus.exceptions import SchemaNotReadyException
+import numpy as np
+import pandas as pd
+from pymilvus import (
+    AsyncMilvusClient,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+)
 from sentence_transformers import SentenceTransformer
 
-from app.common.exceptions.exceptions import MilvusCollectionLoadTimeoutError, NotFoundError
+from app.common.exceptions.exceptions import (
+    NotFoundError,
+)
 from app.common.logger import AISearchLogger
 from app.infrastructure.storages.interfaces import IVectorDatabase
+from app.infrastructure.utils.nlp import l2_normalize
 from app.settings.config import MilvusSettings
 
 
 class MilvusDatabase(IVectorDatabase):
-    """Класс для работы с Milvus DB."""
+    """Класс для работы с Milvus DB с использованием AsyncMilvusClient."""
 
     def __init__(self, settings: MilvusSettings, logger: AISearchLogger):
         self.config = settings
         self.logger = logger
-        connections.connect("default", host=self.config.host, port=self.config.port)
-        self.initialize_model_metadata_collection()
+
+        self.client = AsyncMilvusClient(
+            uri=f"http{'s' if self.config.use_ssl else ''}://{self.config.host}:{self.config.port}",
+            timeout=self.config.connection_timeout,
+        )
+
+        self.__collections_loaded = set()
+
+        # Инициализация выполняется асинхронно
+        asyncio.create_task(self.initialize_model_metadata_collection())
+        asyncio.create_task(self.preload_collections())
 
     @staticmethod
     def get_model_name(model: SentenceTransformer) -> str:
         """Получить имя модели"""
-        return model._first_module().auto_model.config._name_or_path
+        return model._first_module().auto_model.config._name_or_path.split("/")[-1]
 
-    async def create_collection(self, collection_name: str, dim: int) -> None:
-        """Создает коллекцию для хранения векторов."""
+    async def create_collection(
+        self,
+        collection_name: str,
+        dim: int,
+        metadata_fields: list[str],
+        metadata_maxlen: int = 65535,
+    ) -> None:
+        """Создает коллекцию для хранения векторов"""
+        # Проверяем, существует ли коллекция
+        collections = await self.client.list_collections(timeout=self.config.query_timeout)
+        if collection_name in collections:
+            await self.client.drop_collection(collection_name, timeout=self.config.query_timeout)
+
+        # Создаем схему полей
         fields = [
-            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dim),
+            FieldSchema(
+                name=self.config.id_field, dtype=DataType.INT64, is_primary=True, auto_id=True
+            ),
+            FieldSchema(name=self.config.vector_field, dtype=DataType.FLOAT_VECTOR, dim=dim),
+            *[
+                FieldSchema(name=field, dtype=DataType.VARCHAR, max_length=metadata_maxlen)
+                for field in metadata_fields
+            ],
         ]
+
         schema = CollectionSchema(fields, description=f"Collection {collection_name}")
-        collection = Collection(collection_name, schema)
-        await asyncio.to_thread(
-            collection.create_index,
-            "embedding",
-            {
-                "metric_type": "COSINE",
-                "index_type": "IVF_FLAT",
-                "params": {"nlist": self.config.nlist},
-            },
+
+        # Создаем коллекцию
+        await self.client.create_collection(
+            collection_name=collection_name, schema=schema, timeout=self.config.query_timeout
+        )
+
+        # Создаем параметры индекса
+        index_params = self.client.prepare_index_params()
+        index_params.add_index(
+            field_name=self.config.vector_field,
+            index_type="HNSW",
+            metric_type="IP",
+            params={"M": 16, "efConstruction": 128},
+        )
+
+        # Создаем индекс
+        await self.client.create_index(
+            collection_name=collection_name,
+            index_params=index_params,
             timeout=self.config.query_timeout,
         )
 
-    async def insert_vectors(self, collection_name: str, vectors: list[list[float]]) -> None:
+        # Загружаем коллекцию
+        await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+        self.__collections_loaded.add(collection_name)
+
+    async def insert_vectors(
+        self,
+        collection_name: str,
+        vectors: list[list[float]],  # нормализованные векторы
+        metadata: pd.DataFrame | None = None,
+        batch_size: int = 512,
+    ) -> None:
         """Вставка векторов и связанных метаданных в коллекцию."""
-        collection = Collection(collection_name)
-        entities = [
-            list(range(len(vectors))),  # IDs
-            vectors,  # Embeddings
-        ]
-        await asyncio.to_thread(collection.insert, entities, timeout=self.config.query_timeout)
-        await asyncio.to_thread(collection.flush, timeout=self.config.query_timeout)
+        vectors_size = len(vectors)
+
+        if metadata is not None:
+            data_size = len(metadata.index)
+            if vectors_size != data_size:
+                raise ValueError(
+                    f"Количество векторов не равно количеству строк в DataFrame ({vectors_size} != {data_size})"
+                )
+
+            rows = []
+            for _, r in metadata.iterrows():
+                row_dict = {col: str(r[col]) for col in metadata.columns}
+                rows.append(row_dict)
+        else:
+            rows = [{} for _ in range(vectors_size)]
+            if vectors_size == 0:
+                raise ValueError("Нельзя вставить 0 векторов без DataFrame")
+
+        # Убеждаемся, что коллекция загружена
+        if collection_name not in self.__collections_loaded:
+            await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+            self.__collections_loaded.add(collection_name)
+
+        num_batches = (vectors_size + batch_size - 1) // batch_size
+        self.logger.info(f"Загрузка векторов{' и метаданных' if metadata is not None else ''} ...")
+
+        for i in range(num_batches):
+            start = i * batch_size
+            end = min(start + batch_size, vectors_size)
+            vectors_batch = vectors[start:end]
+            rows_batch = rows[start:end]
+
+            # Подготавливаем данные для вставки
+            data = []
+            for vector, row in zip(vectors_batch, rows_batch):
+                item = {self.config.vector_field: vector, **row}
+                data.append(item)
+
+            # Вставляем данные
+            await self.client.insert(
+                collection_name=collection_name, data=data, timeout=self.config.query_timeout
+            )
+            self.logger.info(f"Загружено {i+1}/{num_batches} ...")
+
+        # Выполняем flush для гарантии записи
+        await self.client.flush(collection_name, timeout=self.config.query_timeout)
 
     async def search(
         self, collection_name: str, query_vector: list[float], top_k: int
     ) -> list[dict[str, tp.Any]]:
         """Поиск по косинусной схожести."""
         top_k = max(top_k, 1)
-        collection: Collection = await self.load_collection_and_wait(
-            collection_name=collection_name
-        )
-        search_params = {"metric_type": "COSINE", "params": {"nprobe": self.config.nprobe}}
-        results: list[list[dict[str, tp.Any]]] = await asyncio.to_thread(
-            collection.search,
+
+        # Убеждаемся, что коллекция загружена
+        if collection_name not in self.__collections_loaded:
+            await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+            self.__collections_loaded.add(collection_name)
+
+        results = await self.client.search(
+            collection_name=collection_name,
             data=[query_vector],
-            anns_field="embedding",
-            param=search_params,
+            anns_field=self.config.vector_field,
+            params={"metric_type": "IP", "params": {"ef": 64}},
             limit=top_k,
-            output_fields=["id"],
+            output_fields=self.config.output_fields,
             timeout=self.config.query_timeout,
         )
-        return [{"id": hit["id"], "distance": hit["distance"]} for hits in results for hit in hits]
+
+        out: list[dict[str, tp.Any]] = []
+        if not results:
+            return out
+        hits = results[0]
+        for h in hits:
+            fields = h.entity
+            row = {k: fields.get(k, "") for k in self.config.output_fields}
+            row["score_dense"] = float(h.distance)
+            out.append(row)
+        return out
+
+        # return [{"id": hit["id"], "distance": hit["distance"]} for hits in results for hit in hits]
 
     async def collection_ready(self, collection_name: str) -> bool:
-        """Проверка наличия колллекци."""
-        if not await asyncio.to_thread(
-            utility.has_collection, collection_name, timeout=self.config.query_timeout
-        ):
-            return False
+        """Проверка наличия и готовности коллекции."""
         try:
-            collection = Collection(collection_name)
-            return await asyncio.to_thread(collection.has_index, timeout=self.config.query_timeout)
-        except SchemaNotReadyException:
+            collections = await self.client.list_collections(timeout=self.config.query_timeout)
+            if collection_name not in collections:
+                return False
+
+            # Проверяем, есть ли индекс
+            indexes = await self.client.list_indexes(collection_name)
+            return len(indexes) > 0
+
+        except Exception:
             return False
 
     async def delete_collection(self, collection_name: str) -> None:
         """Удаление коллекции."""
-        collection = Collection(collection_name)
-        await asyncio.to_thread(collection.drop, timeout=self.config.query_timeout)
+        self.logger.info(f"Удаление коллекции {collection_name} ...")
+
+        collections = await self.client.list_collections(timeout=self.config.query_timeout)
+        if collection_name not in collections:
+            self.logger.info(f"Коллекция {collection_name} не существует, удаление не требуется.")
+            self.__collections_loaded.discard(collection_name)
+            return
+
+        await self.client.drop_collection(collection_name, timeout=self.config.query_timeout)
+        self.__collections_loaded.discard(collection_name)
+        self.logger.info(f"Коллекция {collection_name} успешно удалена")
 
     async def get_model_by_collection(self, collection_name: str) -> str:
         """Получение текущей модели из метаданных."""
-        metadata_collection: Collection = await self.load_collection_and_wait(
-            collection_name="model_metadata"
-        )
-        query = f"collection_name == '{collection_name}'"
-        results = await asyncio.to_thread(
-            metadata_collection.query,
-            expr=query,
-            output_fields=["model_name"],
-            timeout=self.config.query_timeout,
-        )
-        if results:
-            return results[0]["model_name"]
-        else:
-            raise NotFoundError
+        try:
+            results = await self.client.query(
+                collection_name="model_metadata",
+                filter=f"collection_name == '{collection_name}'",
+                output_fields=["model_name"],
+                timeout=self.config.query_timeout,
+            )
+
+            if results:
+                return results[0]["model_name"]
+            else:
+                raise NotFoundError(f"Модель для коллекции {collection_name} не найдена")
+        except Exception as e:
+            raise NotFoundError(f"Ошибка при получении модели: {e}")
 
     async def update_model_metadata(self, collection_name: str, model_name: str) -> None:
         """Сохранение информации о модели в метаданные."""
         self.logger.info(
-            f"Создание связи коллекция -> имя модели ({collection_name} -> {model_name})"
+            f"Создание связи коллекция -> имя модели ({collection_name} -> {model_name}) ..."
         )
-        metadata_collection = Collection("model_metadata")
-        entities = [
-            [collection_name],
-            [model_name],
-            [[0.0, 0.0]],
-        ]
-        await asyncio.to_thread(
-            metadata_collection.upsert, entities, timeout=self.config.query_timeout
-        )
-        await asyncio.to_thread(metadata_collection.flush, timeout=self.config.query_timeout)
 
-    def initialize_model_metadata_collection(self) -> None:
+        data = [
+            {
+                "collection_name": collection_name,
+                "model_name": model_name,
+                "dummy_vector": [0.0, 0.0],  # вектор-заглушка
+            }
+        ]
+
+        await self.client.upsert(
+            collection_name="model_metadata", data=data, timeout=self.config.query_timeout
+        )
+        await self.client.flush("model_metadata", timeout=self.config.query_timeout)
+
+    async def initialize_model_metadata_collection(self) -> None:
         """Инициализация коллекции для метаданных модели."""
-        if not utility.has_collection("model_metadata", timeout=self.config.query_timeout):
+        collections = await self.client.list_collections(timeout=self.config.query_timeout)
+
+        if "model_metadata" not in collections:
             fields = [
                 FieldSchema(
                     name="collection_name", dtype=DataType.VARCHAR, max_length=255, is_primary=True
                 ),
                 FieldSchema(name="model_name", dtype=DataType.VARCHAR, max_length=255),
-                FieldSchema(
-                    name="dummy_vector", dtype=DataType.FLOAT_VECTOR, dim=2
-                ),  # вектор-заглушка для хранения связи коллекция -> модель
+                FieldSchema(name="dummy_vector", dtype=DataType.FLOAT_VECTOR, dim=2),
             ]
+
             schema = CollectionSchema(fields, description="Метаданные моделей")
-            collection = Collection("model_metadata", schema)
-            collection.create_index(
-                "dummy_vector",
-                {
-                    "metric_type": "L2",
-                    "index_type": "IVF_FLAT",
-                    "params": {"nlist": 1},
-                },
+
+            await self.client.create_collection(
+                collection_name="model_metadata", schema=schema, timeout=self.config.query_timeout
+            )
+
+            # Создаем параметры индекса для model_metadata
+            index_params = self.client.prepare_index_params()
+            index_params.add_index(
+                field_name="dummy_vector",
+                index_type="IVF_FLAT",
+                metric_type="L2",
+                params={"nlist": 1},
+            )
+
+            await self.client.create_index(
+                collection_name="model_metadata",
+                index_params=index_params,
                 timeout=self.config.query_timeout,
             )
+
             self.logger.info("Коллекция 'model_metadata' успешно создана")
 
-    async def load_collection_and_wait(self, collection_name: str) -> Collection:
-        """Загрузка коллекции."""
-        collection = Collection(collection_name)
-        await asyncio.to_thread(collection.load, timeout=self.config.load_timeout)
+        # Загружаем коллекцию
+        await self.client.load_collection("model_metadata", timeout=self.config.query_timeout)
+        self.__collections_loaded.add("model_metadata")
 
-        async def check_load_state() -> None:
-            while not utility.load_state(collection_name):
-                await asyncio.sleep(0.5)
-
-        try:
-            await asyncio.wait_for(check_load_state(), timeout=self.config.load_timeout)
-        except asyncio.TimeoutError:
-            raise MilvusCollectionLoadTimeoutError(
-                f"Таймаут при загрузке коллекции '{collection_name}'."
-            )
-        return collection
+    async def preload_collections(self) -> None:
+        """Предзагрузка коллекций в память"""
+        for collection_name in self.config.preloaded_collection_names:
+            try:
+                self.logger.info(f"Загрузка коллекции {collection_name} ...")
+                await self.client.load_collection(
+                    collection_name, timeout=self.config.query_timeout
+                )
+                self.__collections_loaded.add(collection_name)
+                self.logger.info(f"Коллекция {collection_name} успешно загружена")
+            except Exception as e:
+                self.logger.warning(f"Не удалось загрузить коллекцию {collection_name}: {e}")
 
     async def get_model_metadata(self, limit: int = 10) -> list[dict[str, tp.Any]]:
         """Получение результатов model_metadata"""
-        metadata_collection: Collection = await self.load_collection_and_wait(
-            collection_name="model_metadata"
-        )
-        results = await asyncio.to_thread(
-            metadata_collection.query,
-            expr="",
-            limit=limit,
-            output_fields=["model_name", "collection_name"],
-        )
-        return results
+        try:
+            results = await self.client.query(
+                collection_name="model_metadata",
+                filter="",
+                limit=limit,
+                output_fields=["model_name", "collection_name"],
+                timeout=self.config.query_timeout,
+            )
+            return results
+        except Exception as e:
+            self.logger.error(f"Ошибка при получении метаданных моделей: {e}")
+            return []
 
     async def index_documents(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: pd.DataFrame | None = None,
     ) -> None:
         """Индексация документов в vector_db."""
-        embeddings = model.encode(documents)
-        await self.create_collection(collection_name, dim=embeddings.shape[1])
-        await self.insert_vectors(collection_name, embeddings.tolist())
+        embeddings = model.encode(documents, normalize_embeddings=True)
+        embeddings = np.vstack([l2_normalize(e) for e in embeddings])
 
-    async def ensure_model_consistency(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
-    ) -> bool:
-        """Гарантирует актуальность связи коллекция -> модель
-        Возвращает True, если модель была изменена
-        """
+        metadata_fields = metadata.columns.tolist() if metadata is not None else []
+        await self.create_collection(
+            collection_name,
+            dim=embeddings.shape[1],
+            metadata_fields=metadata_fields,
+        )
+
+        await self.insert_vectors(
+            collection_name=collection_name, vectors=embeddings.tolist(), metadata=metadata
+        )
+
+    async def ensure_collection(
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: pd.DataFrame | None = None,
+        recreate: bool = False,
+    ) -> None:
+        """Гарантирует готовность коллекции (актуальная модель) и пересоздаёт при необходимости"""
         self.logger.info(await self.get_model_metadata())
+
+        if recreate:
+            self.logger.info("Пересоздание коллекции (recreate=True) ...")
+            if await self.collection_ready(collection_name):
+                await self.delete_collection(collection_name=collection_name)
+
+            await self.initialize_collection(
+                collection_name=collection_name, model=model, documents=documents, metadata=metadata
+            )
+            return
+
+        # Если recreate = False, проверяем существование и модель
         if not await self.collection_ready(collection_name):
-            await self.initialize_collection(collection_name, model, documents)
-            return False
-        else:
-            current_model = await self.get_model_by_collection(collection_name)
-            if current_model != MilvusDatabase.get_model_name(model):
-                await self.handle_model_change(collection_name, model, documents)
-                return True
-            return False
+            self.logger.info("Коллекция не существует, создание новой ...")
+            await self.initialize_collection(
+                collection_name=collection_name, model=model, documents=documents, metadata=metadata
+            )
+            return
+
+        # Коллекция существует, проверяем модель
+        try:
+            current_model_name = await self.get_model_by_collection(collection_name)
+        except NotFoundError:
+            self.logger.info(
+                f"Коллекция {collection_name} существует, но не найдена связанная модель. Пересоздаём ..."
+            )
+            await self.delete_collection(collection_name=collection_name)
+            await self.initialize_collection(
+                collection_name=collection_name, model=model, documents=documents, metadata=metadata
+            )
+            return
+
+        # Модель успешно получена, проверяем, совпадает ли она
+        expected_model_name = MilvusDatabase.get_model_name(model)
+        if current_model_name != expected_model_name:
+            self.logger.info(
+                f"Модель изменилась: {current_model_name} -> {expected_model_name}. Пересоздаём коллекцию."
+            )
+            await self.delete_collection(collection_name=collection_name)
+            await self.initialize_collection(
+                collection_name=collection_name, model=model, documents=documents, metadata=metadata
+            )
 
     async def initialize_collection(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: pd.DataFrame | None = None,
     ) -> None:
         """Инициализация коллекции с текущей моделью."""
-        self.logger.info("Инициализация коллекции")
-        await self.index_documents(collection_name, model, documents)
+        self.logger.info(f"Инициализация коллекции {collection_name} ...")
+        await self.index_documents(
+            collection_name=collection_name, model=model, documents=documents, metadata=metadata
+        )
         await self.update_model_metadata(collection_name, MilvusDatabase.get_model_name(model))
 
-    async def handle_model_change(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
-    ) -> None:
-        """Обработка смены модели."""
-        old_model_name: str = await self.get_model_by_collection(collection_name=collection_name)
-        self.logger.info(
-            f"Смена модели: {old_model_name} -> {MilvusDatabase.get_model_name(model)}"
-        )
-        await self.delete_collection(collection_name)
-        await self.initialize_collection(collection_name, model, documents)
+    async def close(self) -> None:
+        """Закрытие соединения с клиентом."""
+        if hasattr(self, "client"):
+            await self.client.close()

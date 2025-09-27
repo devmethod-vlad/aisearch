@@ -51,11 +51,11 @@ class LLMQueue(ILLMQueue):
                     total_len = queued_len + processing_len
 
                     if total_len >= self.max_size:
-                        await pipe.unwatch()
+                        await pipe.unwatch()  # type: ignore
                         raise OverflowError(f"LLM queue overflow: {total_len}/{self.max_size}")
 
                     # Начинаем транзакцию
-                    pipe.multi()
+                    pipe.multi()  # type: ignore
                     # Записываем мета по тикету
                     await pipe.hset(hkey, mapping=data)
                     await pipe.expire(hkey, self.ticket_ttl)
@@ -95,31 +95,25 @@ class LLMQueue(ILLMQueue):
 
     async def dequeue(self) -> tuple[str, dict[str, tp.Any]] | None:
         """Извлечение задачи из начала очереди"""
-        print("Извлекаем задачу")
-
         ticket_id = await self.redis.lpop(self.qkey)
 
         if not ticket_id:
-            print("None ticket")
             return None
         ticket_id = ticket_id.decode()
         hkey = f"{self.tprefix}{ticket_id}"
-
-        data = await self.redis.hgetall(hkey)
-
+        # data = await self.redis.hgetall(hkey)
         raw = await self.redis.hget(hkey, "payload")
 
         if raw is None:
-            print("Хэш не найден или поле payload отсутствует:", hkey)
             return ticket_id, {}
 
         payload = (
             json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
         )
-        print(ticket_id, payload)
         return ticket_id, payload
 
     async def status(self, ticket_id: str) -> dict[str, tp.Any]:
+        """Получение статуса задачи"""
         hkey = f"{self.tprefix}{ticket_id}"
         data = await self.redis.hgetall(hkey)
         if not data:
@@ -138,8 +132,7 @@ class LLMQueue(ILLMQueue):
         return data
 
     async def dequeue_blocking(self, timeout: int = 0) -> tuple[str, dict[str, tp.Any]] | None:
-        """"""
-        print("РАсчехляем очередь")
+        """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
         raw_tid = await self.redis.brpoplpush(self.qkey, self.pkey, timeout=timeout)
         if not raw_tid:
             return None
@@ -147,10 +140,9 @@ class LLMQueue(ILLMQueue):
         ticket_id = raw_tid.decode() if isinstance(raw_tid, (bytes, bytearray)) else str(raw_tid)
 
         hkey = f"{self.tprefix}{ticket_id}"
-        data = await self.redis.hgetall(hkey)  # можно оставить — сейчас не используется
+        # data = await self.redis.hgetall(hkey)  # можно оставить — сейчас не используется
         raw = await self.redis.hget(hkey, "payload")
         if raw is None:
-            print("RAW IS NONE")
             return ticket_id, {}
         payload = (
             json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
