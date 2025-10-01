@@ -13,6 +13,8 @@ services:
           IMAGE_NAME: ${IMAGE_NAME}
           IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
           REGISTRY: ${REGISTRY}
+          CUDA_IMAGE: ${CUDA_IMAGE}
+          CUDA_WHEEL: ${CUDA_WHEEL}
 #    image: ${REGISTRY}/${IMAGE_NAME}
     healthcheck:
       disable: true
@@ -20,13 +22,7 @@ services:
     networks:
       - default
       - service-network
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
+
     command: >
       sh -c "
         exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
@@ -45,6 +41,8 @@ services:
           IMAGE_NAME: ${IMAGE_NAME}
           IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
           REGISTRY: ${REGISTRY}
+          CUDA_IMAGE: ${CUDA_IMAGE}
+          CUDA_WHEEL: ${CUDA_WHEEL}
     networks:
       - default
       - service-network
@@ -78,9 +76,9 @@ services:
     networks:
       - default
 
-  aisearch-vllm:
-    networks:
-      - default
+#  aisearch-vllm:
+#    networks:
+#      - default
 
 networks:
   default:

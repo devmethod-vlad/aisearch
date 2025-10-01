@@ -62,6 +62,14 @@ class ILLMQueue(abc.ABC):
         """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
 
     @abc.abstractmethod
+    async def sweep_processing(self, stale_sec: int = 60) -> int:
+        """Вернуть из processing устаревшие задачи; вернуть кол-во переставленных."""
+
+    @abc.abstractmethod
+    async def requeue(self, ticket_id: str, *, reason: str | None = None) -> None:
+        """Переместить тикет из processing обратно в хвост основной очереди."""
+
+    @abc.abstractmethod
     async def ack(self, ticket_id: str) -> None:
         """Удалить тикет из processing (LREM)"""
 

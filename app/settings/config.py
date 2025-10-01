@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class EnvBaseSettings(BaseSettings):
-    """Базовый класс для прокидывания настроек из env."""
+    """Базовый класс для прокидывания настроек из .env."""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -182,6 +182,13 @@ class BM25Settings(EnvBaseSettings):
     recreate_index: bool = False
     model_config = SettingsConfigDict(env_prefix="bm25_")
 
+class SlowAPISettings(EnvBaseSettings):
+    """Настройки slowapi лимитов"""
+    search: str
+    generate: str
+
+    model_config = SettingsConfigDict(env_prefix="slowapi_limit_")
+
 
 class RerankerSettings(EnvBaseSettings):
     """Cross Encoder настройки"""
@@ -226,6 +233,7 @@ class Settings(EnvBaseSettings):
     reranker: RerankerSettings = RerankerSettings()
     warmup: WarmupSettings = WarmupSettings()
     switches: SearchSwitches = SearchSwitches()
+    slowapi: SlowAPISettings = SlowAPISettings()
 
     @model_validator(mode="after")
     def _fill_vllm_model(self) -> Self:

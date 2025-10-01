@@ -22,3 +22,4 @@ celerybeat-schedule
 bm25index
 poetry.lock
 *.xlsx
+/nltk/

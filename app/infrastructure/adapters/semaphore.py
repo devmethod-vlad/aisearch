@@ -77,6 +77,9 @@ class RedisSemaphore(IRedisSemaphore):
         while True:
             if await self.try_acquire(holder):
                 break
+            if to == -1:
+                await asyncio.sleep(0.2)
+                continue
             if to == 0:
                 raise TimeoutError("global semaphore: limit reached")
             if (await self._now_ms()) - start >= to:

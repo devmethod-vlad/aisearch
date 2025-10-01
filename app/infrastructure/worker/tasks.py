@@ -44,7 +44,14 @@ def search_task(
 
         logger = AISearchLogger(logger_type=LoggerType.CELERY)
         logger.info("Начало выполнения задачи 'search_task'...")
-        orchestrator = await container.get(IHybridSearchOrchestrator)
+        try:
+            orchestrator = await container.get(IHybridSearchOrchestrator)
+        except Exception as e:
+            logger.info(f"Оркестратор не проинициализирован с ошибкой {e}")
+            queue: ILLMQueue = await container.get(ILLMQueue)
+            await queue.set_failed(ticket_id, f"send_task(search) error: {e!r}")
+            await queue.ack(ticket_id)
+            return {"status": "failed"}
 
         task_id = getattr(self, "task_id", None) or getattr(self.request, "id", "")
         result = await orchestrator.documents_search(

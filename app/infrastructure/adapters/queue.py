@@ -25,6 +25,22 @@ class LLMQueue(ILLMQueue):
         self.ticket_ttl = settings.llm_queue.ticket_ttl
         self.pkey = settings.llm_queue.processing_list_key or f"{self.qkey}:processing"
 
+    async def requeue(self, ticket_id: str, *, reason: str | None = None) -> None:
+        """Снять тикет с processing и поставить его в конец основной очереди."""
+        now = int(time.time())
+        hkey = f"{self.tprefix}{ticket_id}"
+        async with self.redis.pipeline() as pipe:
+            # Обновляем статус и метаданные
+            await pipe.hset(hkey, mapping={
+                "state": "queued",
+                "task_id": "",
+                "error": reason or "",
+                "updated_at": now,
+            })
+            await pipe.lrem(self.pkey, 1, ticket_id)
+            await pipe.rpush(self.qkey, ticket_id)
+            await pipe.execute()
+
     async def enqueue(self, payload: dict[str, tp.Any]) -> tuple[str, int]:
         """Постановка задачи в очередь с учётом позиции и защиты от переполнения."""
         ticket_id = payload["ticket_id"]
@@ -140,7 +156,9 @@ class LLMQueue(ILLMQueue):
         ticket_id = raw_tid.decode() if isinstance(raw_tid, (bytes, bytearray)) else str(raw_tid)
 
         hkey = f"{self.tprefix}{ticket_id}"
-        # data = await self.redis.hgetall(hkey)  # можно оставить — сейчас не используется
+        now = int(time.time())
+        await self.redis.hset(hkey, mapping={"updated_at": now}) # добавил обновление по времени из main -> processing
+
         raw = await self.redis.hget(hkey, "payload")
         if raw is None:
             return ticket_id, {}
@@ -152,3 +170,40 @@ class LLMQueue(ILLMQueue):
     async def ack(self, ticket_id: str) -> None:
         """Подтверждение обработки: удаляем из processing."""
         await self.redis.lrem(self.pkey, 1, ticket_id)
+
+    async def sweep_processing(self, stale_sec: int = 60) -> int:
+        """
+        Возвращает в основную очередь тикеты, застрявшие в processing дольше stale_sec
+        Если хэш исчез — просто удаляем из processing.
+        """
+        now = int(time.time())
+        ids = await self.redis.lrange(self.pkey, 0, -1)
+        requeued = 0
+
+        for raw in ids:
+            ticket_id = raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            hkey = f"{self.tprefix}{ticket_id}"
+            data = await self.redis.hgetall(hkey)
+
+            if not data:
+                # Хэш пропал/протух — очистим processing
+                await self.redis.lrem(self.pkey, 1, ticket_id)
+                continue
+
+            # Вспомогательный декодер
+            def _get(k: bytes, default: str = "") -> str:
+                v = data.get(k)
+                return v.decode() if isinstance(v, (bytes, bytearray)) else (v or default)
+
+            state = _get(b"state")
+            try:
+                updated_at = int(_get(b"updated_at", "0"))
+            except ValueError:
+                updated_at = 0
+
+            # Реальные «подвисшие» состояния — queued/running без движения
+            if state in {"queued", "running"} and now - updated_at >= stale_sec:
+                await self.requeue(ticket_id, reason="sweep: stale in processing")
+                requeued += 1
+
+        return requeued

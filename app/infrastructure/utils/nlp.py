@@ -1,6 +1,9 @@
 import contextlib
 import hashlib
+import os
 import re
+from pathlib import Path
+
 import unicodedata
 
 import nltk
@@ -8,19 +11,36 @@ import numpy as np
 import pymorphy3
 
 
-def download_nltk_resources() -> None:
-    """Загрузка ресурсов NLTK при инициализации приложения"""
-    required_resources = {
+def configure_nltk_paths() -> Path:
+    """Конфигурация пути nltk ресурсов"""
+    base = Path(os.getenv("NLTK_DATA", "/srv/nltk_data"))  # общий путь в контейнере
+    p = base.resolve()
+    if str(p) not in nltk.data.path:
+        nltk.data.path.insert(0, str(p))
+    return p
+
+def assert_nltk_resources_present() -> None:
+    """Проверка наличия необходимых ресурсов"""
+    needed = {
         "punkt": "tokenizers/punkt",
         "punkt_tab": "tokenizers/punkt_tab",
         "stopwords": "corpora/stopwords",
     }
-    for resource_name, resource_path in required_resources.items():
+    missing = []
+    for name, path in needed.items():
         try:
-            nltk.data.find(resource_path)
+            nltk.data.find(path)
         except LookupError:
-            with contextlib.suppress(FileExistsError):
-                nltk.download(resource_name)
+            missing.append(name)
+    if missing:
+        raise RuntimeError(f"Отсутствуют NLTK-ресурсы: {', '.join(missing)} "
+                           f"в {nltk.data.path!r}")
+
+
+def download_nltk_resources() -> None:
+    """Загрузка ресурсов NLTK при инициализации приложения"""
+    configure_nltk_paths()
+    assert_nltk_resources_present()
 
 
 def hash_query(normalized_query: str) -> str:

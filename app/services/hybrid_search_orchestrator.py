@@ -1,3 +1,4 @@
+import asyncio
 import contextlib
 import json
 import typing as tp
@@ -62,10 +63,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         pack = json.loads(raw)
         query = normalize_query(pack["query"])
         query_hash = hash_query(query)
-        query_vector = model.encode([query], convert_to_numpy=True)[0]
         top_k = int(pack["top_k"])
+        need_ack = True
         try:
             async with self.sem.acquire():
+                query_vector = (await asyncio.to_thread(model.encode, [query], convert_to_numpy=True))[0]
                 cache_key = f"hyb:{query_hash}:{top_k}:{self.settings.version}"
                 cached = await self.redis.get(cache_key)
                 if cached:
@@ -85,7 +87,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     merged = self._merge_candidates(dense, lex)
                     if self.switches.use_reranker and merged:
                         pairs = [(query, self._concat_text(m)) for m in merged]
-                        ce_scores = self.ce.rank(pairs)
+                        ce_scores = await asyncio.to_thread(self.ce.rank, pairs)
                         for m, s in zip(merged, ce_scores):
                             m["score_ce"] = float(s)
                     _results = self._score_and_slice(
@@ -104,12 +106,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
                 await self.queue.set_done(ticket_id)
                 return {"status": "ok"}
+        except TimeoutError as e:
+
+            await self.queue.requeue(ticket_id, reason="global semaphore busy")
+            need_ack = False
+            return {"status": "requeued"}
         except Exception as e:
             await self.queue.set_failed(ticket_id, str(e))
             raise
         finally:
-            with contextlib.suppress(Exception):
-                await self.queue.ack(ticket_id)
+            if need_ack:
+                with contextlib.suppress(Exception):
+                    await self.queue.ack(ticket_id)
 
     async def _os_candidates(self, query: str, k: int) -> list[dict[str, tp.Any]]:
         os_adapter = self.os_adapter
@@ -124,7 +132,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 }
             }
         }
-        hits = os_adapter.search(body, size=k)
+        hits = await asyncio.to_thread(os_adapter.search, body, k)
         out = []
         for h in hits:
             src = h.get("_source", {})
@@ -141,7 +149,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         return out
 
     async def _bm25_candidates(self, query: str, k: int) -> list[dict[str, tp.Any]]:
-        rows = self.bm25.search(query, top_k=k)
+        rows = await asyncio.to_thread(self.bm25.search, query, k)
         out = []
         for r in rows:
             out.append(

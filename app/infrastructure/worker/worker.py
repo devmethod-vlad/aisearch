@@ -30,6 +30,8 @@ container: AsyncContainer | None = None
 model: tp.Any | None = None
 drain_task: asyncio.Task | None = None
 logger: AISearchLogger | None = None
+sweep_task: asyncio.Task | None = None
+
 
 worker = Celery(
     "aisearch",
@@ -140,34 +142,63 @@ async def _queue_drain_loop() -> None:
             task_type = pack.get("type")
 
             if task_type == "search":
-                worker.send_task(
-                    "search_task",
-                    args=(ticket_id, payload["pack_key"], payload["result_key"]),
-                    queue="default",
-                    task_id=ticket_id,
-                )
+                try:
+                    worker.send_task(
+                        "search_task",
+                        args=(ticket_id, payload["pack_key"], payload["result_key"]),
+                        queue="default",
+                        task_id=ticket_id,
+                    )
+                except Exception as e:
+                    await queue.set_failed(ticket_id, f"send_task(search) error: {e!r}")
+                    await queue.ack(ticket_id)
+
             elif task_type == "generate":
-                worker.send_task(
-                    "generate_task",
-                    args=(ticket_id, payload["pack_key"], payload["result_key"]),
-                    queue="default",
-                    task_id=ticket_id,
-                )
+                try:
+                    worker.send_task(
+                        "generate_task",
+                        args=(ticket_id, payload["pack_key"], payload["result_key"]),
+                        queue="default",
+                        task_id=ticket_id,
+                    )
+                except Exception as e:
+                    await queue.set_failed(ticket_id, f"send_task(generate) error: {e!r}")
+                    await queue.ack(ticket_id)
+
+            else:
+
+                await queue.set_failed(ticket_id, f"unknown task type: {task_type!r}")
+                await queue.ack(ticket_id)
         except Exception as e:
             logger.error(f"{e} - ошибка в drain queue loop")
             await asyncio.sleep(1)
 
 
+async def _processing_sweeper(period_sec: int = 10, stale_sec: int = 60) -> None:
+    """Очистка протухших тикетов и перестановка в начало очереди"""
+    assert container is not None
+    queue = await container.get(ILLMQueue)
+    _logger = await container.get(AISearchLogger)
+    while True:
+        try:
+            n = await queue.sweep_processing(stale_sec=stale_sec)
+            if n:
+                _logger.warning(f"sweep_processing: requeued {n} stale tickets")
+        except Exception as e:
+            _logger.error(f"sweep_processing error: {e!r}")
+        await asyncio.sleep(period_sec)
+
+
 @worker_process_init.connect
 def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
     """Процесс перед инициализацией воркера"""
-    global drain_task  # noqa: PLW0603
+    global drain_task, sweep_task # noqa: PLW0603
 
     asyncio.set_event_loop(loop)
     init_container_and_model()
-    # Запуск drain loop в отдельной задаче
+    # Запуск drain loop и sweep_task в отдельной задаче
     drain_task = asyncio.ensure_future(_queue_drain_loop(), loop=loop)
-
+    sweep_task = asyncio.ensure_future(_processing_sweeper(), loop=loop)
     # Запуск loop в отдельном потоке
     def _start_loop() -> None:
         loop.run_forever()
@@ -187,14 +218,18 @@ def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any])
 def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
     """Процесс после остановки воркера"""
 
-    async def _stop_drain() -> None:
+    async def _stop_drain_and_sweep() -> None:
         if drain_task:
             drain_task.cancel()
             with contextlib.suppress(Exception):
                 await drain_task
+        if sweep_task:  # 🔽 корректно останавливаем «подметальщик»
+            sweep_task.cancel()
+            with contextlib.suppress(Exception):
+                await sweep_task
 
     async def _run() -> None:
-        await _stop_drain()
+        await _stop_drain_and_sweep()
         if container:
             vllm_client = await container.get(IVLLMAdapter)
             await vllm_client.close()

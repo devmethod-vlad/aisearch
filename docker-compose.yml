@@ -7,12 +7,14 @@ services:
       - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
     volumes:
       - ./:/backend
       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
       - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
       - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
     ports:
       - ${APP_PORT}:${APP_PORT}
     healthcheck:
@@ -20,6 +22,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+        restart: true
+      aisearch-celery-worker:
+        condition: service_healthy
+        restart: true
     command: >
       sh -c "
         exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker --access-logfile ${GUNICORN_LOGS_CONTR_PATH}/access.log --error-logfile ${GUNICORN_LOGS_CONTR_PATH}/error.log
@@ -36,12 +46,21 @@ services:
       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
       - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
     env_file:
       - .env
     environment:
       - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+
+    healthcheck:
+      test: [ "CMD-SHELL", "celery -A app.infrastructure.worker.worker:worker inspect ping -d \"celery@$(hostname)\" --timeout=5 | grep -q pong" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   aisearch-etcd:
     container_name: aisearch-etcd
@@ -130,31 +149,31 @@ services:
       timeout: 5s
       retries: 30
 
-  aisearch-vllm:
-    image: vllm/vllm-openai:latest
-    container_name: aisearch-vllm
-    ports:
-      - 8000:8000
-    volumes:
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-    env_file:
-      - .env
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - HF_HUB_OFFLINE=1
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: [ gpu ]
-              driver: nvidia
-              count: all
-    shm_size: 16g
-    command: >
-      --model ${APP_MODELSTORE_CONTR_PATH}/${VLLM_MODEL_NAME}
-      --quantization awq
-      --served-model-name ${VLLM_MODEL_SERVED_NAME}
-      --max-model-len ${VLLM_MAX_INPUT_TOKENS}
-      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION}
-      --trust-remote-code
-      --port ${VLLM_PORT}
+#  aisearch-vllm:
+#    image: vllm/vllm-openai:latest
+#    container_name: aisearch-vllm
+#    ports:
+#      - 8000:8000
+#    volumes:
+#      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+#    env_file:
+#      - .env
+#    environment:
+#      - NVIDIA_VISIBLE_DEVICES=all
+#      - HF_HUB_OFFLINE=1
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - capabilities: [ gpu ]
+#              driver: nvidia
+#              count: all
+#    shm_size: 16g
+#    command: >
+#      --model ${APP_MODELSTORE_CONTR_PATH}/${VLLM_MODEL_NAME}
+#      --quantization awq
+#      --served-model-name ${VLLM_MODEL_SERVED_NAME}
+#      --max-model-len ${VLLM_MAX_INPUT_TOKENS}
+#      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION}
+#      --trust-remote-code
+#      --port ${VLLM_PORT}

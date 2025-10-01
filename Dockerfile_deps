@@ -7,12 +7,13 @@ ARG https_proxy
 ARG http_proxy
 ARG HTTP_PROXY
 ARG HTTPS_PROXY
+ARG CUDA_WHEEL
 
 ENV http_proxy=${http_proxy} https_proxy=${https_proxy}\
     HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY}
 
 RUN uv pip install --system --no-cache-dir \
-    --index-url https://download.pytorch.org/whl/cu128 \
+    --index-url https://download.pytorch.org/whl/${CUDA_WHEEL} \
     torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1
 
 WORKDIR /deps

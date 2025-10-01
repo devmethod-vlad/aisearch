@@ -14,6 +14,8 @@
     COMPOSE_PATH_SEPARATOR=';'
     COMPOSE_FILE='docker-compose.yml;docker-compose.dev.yml'
 
+    CUDA_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu22.04
+    CUDA_WHEEL=cu128
     HTTPS_PROXY=''
     HTTP_PROXY=''
     IMAGE_NAME_BASE=cuda-python-uv-base:latest
@@ -97,6 +99,12 @@
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
 
+    # === SlowAPI ===
+    
+    SLOWAPI_LIMIT_SEARCH=5/minute
+    SLOWAPI_LIMIT_GENERATE=5/minute
+
+
     # === OpenSearch ===
     OS_HOST=aisearch-opensearch
     OS_PORT=9200
@@ -114,6 +122,10 @@
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000
     OS_RECREATE_INDEX=true
+
+    NLTK_DATA_HOST_PATH=E:/nltk    # выкачка ресурсов через python -m nltk.downloader -d путь_к_папке punkt stopwords punkt_tab
+    NLTK_DATA_CONTR_PATH=/srv/nltk_data
+    
 
     # === BM25 (Whoosh) ===
     BM25_INDEX_PATH_HOST=C:/Users/omka/models/1
@@ -170,7 +182,13 @@
 
 ## Сборка на примере базового образа для Bash
 ```
-( set -a; . ./.env; set +a; docker build -f Dockerfile_base -t "$IMAGE_NAME_BASE" --build-arg http_proxy="$HTTP_PROXY" --build-arg https_proxy="$HTTPS_PROXY" --build-arg HTTP_PROXY="$HTTP_PROXY" --build-arg HTTPS_PROXY="$HTTPS_PROXY" . && docker tag "$IMAGE_NAME_BASE" "$REGISTRY/$IMAGE_NAME_BASE" && docker push "$REGISTRY/$IMAGE_NAME_BASE" )
+( set -a; . <(sed 's/\r$//' .env); set +a;
+  DOCKER_BUILDKIT=0 docker build -f Dockerfile_base -t "$IMAGE_NAME_BASE" \
+    --build-arg http_proxy="$HTTP_PROXY" --build-arg https_proxy="$HTTPS_PROXY" \
+    --build-arg HTTP_PROXY="$HTTP_PROXY" --build-arg HTTPS_PROXY="$HTTPS_PROXY" . && \
+  docker tag "$IMAGE_NAME_BASE" "$REGISTRY/$IMAGE_NAME_BASE" && \
+  docker push "$REGISTRY/$IMAGE_NAME_BASE"
+)
 ```
 
 ## Сборка на примере базового образа для PowerShell

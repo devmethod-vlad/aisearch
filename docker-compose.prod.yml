@@ -12,6 +12,8 @@ services:
           IMAGE_NAME: ${IMAGE_NAME}
           IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
           REGISTRY: ${REGISTRY}
+          CUDA_IMAGE: ${CUDA_IMAGE}
+          CUDA_WHEEL: ${CUDA_WHEEL}
     networks:
       - default
       - service-network
@@ -29,6 +31,8 @@ services:
          IMAGE_NAME: ${IMAGE_NAME}
          IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
          REGISTRY: ${REGISTRY}
+         CUDA_IMAGE: ${CUDA_IMAGE}
+         CUDA_WHEEL: ${CUDA_WHEEL}
     networks:
       - default
       - service-network

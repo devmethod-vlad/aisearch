@@ -2,16 +2,24 @@ from dishka.integrations.fastapi import FromDishka, inject
 from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from starlette.requests import Request
 
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.services.interfaces import IHybridSearchService
+from app.settings.config import settings
+
+limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
 
 
 @router.post("/search", response_model=TaskResponse)
+@limiter.limit(settings.slowapi.search, key_func=get_remote_address)
 @inject
 async def get_documents(
+    request: Request,
     query: str,
     top_k: int = 5,
     service: FromDishka[IHybridSearchService] = None,
@@ -22,8 +30,10 @@ async def get_documents(
 
 
 @router.post("/generate", response_model=TaskResponse)
+@limiter.limit(settings.slowapi.generate, key_func=get_remote_address)
 @inject
 async def generate_answer(
+    request: Request,
     query: str,
     top_k: int = 5,
     system_prompt: str | None = None,
