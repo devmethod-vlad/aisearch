@@ -19,7 +19,7 @@ class BM25Adapter(IBM25Adapter):
         self.schema_fields = settings.bm25.schema_fields
         self._ix: BM25Okapi | None = None
         self._data: pd.DataFrame | None = None
-        self.ensure_index()
+        self.ensure_index() if settings.switches.use_bm25 else None
         self.logger = logger
 
     @staticmethod
@@ -45,10 +45,13 @@ class BM25Adapter(IBM25Adapter):
 
     def ensure_index(self) -> None:
         """Подгрузка индекса"""
-        with open(f"{self.index_path}/bm25.pkl", "rb") as f:
-            bm25_pack = pickle.load(f)
-        self._ix = bm25_pack["bm25"]
-        self._data = pd.read_parquet(f"{self.index_path}/rows.parquet")
+        try:
+            with open(f"{self.index_path}/bm25.pkl", "rb") as f:
+                bm25_pack = pickle.load(f)
+            self._ix = bm25_pack["bm25"]
+            self._data = pd.read_parquet(f"{self.index_path}/rows.parquet")
+        except Exception as e:
+            self.logger.warning(f"Не удалось подгрузить индексы из {self.index_path}, error: {e}")
 
     def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
         """Возвращает список кандидатов:

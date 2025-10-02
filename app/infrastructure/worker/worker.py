@@ -189,21 +189,55 @@ async def _processing_sweeper(period_sec: int = 10, stale_sec: int = 60) -> None
         await asyncio.sleep(period_sec)
 
 
+def spawn_supervised(
+    name: str,
+    coro_factory: tp.Callable[[], tp.Awaitable[None]],
+    log,
+    *,
+    backoff_initial: float = 0.5,
+    backoff_max: float = 30.0,
+) -> Future:
+    """
+    Запускает корутину с автоперезапуском при крэше.
+    coro_factory ДОЛЖНА возвращать НОВУЮ корутину при каждом вызове.
+    """
+
+    async def _runner() -> None:
+        delay = backoff_initial
+        while True:
+            try:
+                log.info(f"[supervisor] start {name}")
+                await coro_factory()
+                log.warning(f"[supervisor] {name} exited; restart in 1s")
+                delay = backoff_initial
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                log.info(f"[supervisor] {name} cancelled")
+                raise
+            except Exception as e:
+                log.exception(f"[supervisor] {name} crashed: {e!r}; restart in {delay:.1f}s")
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, backoff_max)
+
+    # важно: запускаем в глобальном loop через thread-safe API
+    return asyncio.run_coroutine_threadsafe(_runner(), loop)
+
+
 @worker_process_init.connect
 def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
-    """Процесс перед инициализацией воркера"""
-    global drain_task, sweep_task # noqa: PLW0603
-
-    asyncio.set_event_loop(loop)
     init_container_and_model()
-    # Запуск drain loop и sweep_task в отдельной задаче
-    drain_task = asyncio.ensure_future(_queue_drain_loop(), loop=loop)
-    sweep_task = asyncio.ensure_future(_processing_sweeper(), loop=loop)
-    # Запуск loop в отдельном потоке
+    global drain_task, sweep_task
+
+    # стартуем event loop в отдельном потоке
     def _start_loop() -> None:
+        asyncio.set_event_loop(loop)
         loop.run_forever()
 
     threading.Thread(target=_start_loop, daemon=True).start()
+
+    # теперь можно запускать фоновые supervised задачи
+    drain_task = spawn_supervised("drain", lambda: _queue_drain_loop(), logger)
+    sweep_task = spawn_supervised("sweeper", lambda: _processing_sweeper(), logger)
 
 
 @task_prerun.connect
@@ -216,23 +250,38 @@ def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any])
 
 @worker_process_shutdown.connect
 def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
-    """Процесс после остановки воркера"""
+    """Корректный shutdown воркера Celery."""
 
-    async def _stop_drain_and_sweep() -> None:
-        if drain_task:
-            drain_task.cancel()
-            with contextlib.suppress(Exception):
-                await drain_task
-        if sweep_task:  # 🔽 корректно останавливаем «подметальщик»
-            sweep_task.cancel()
-            with contextlib.suppress(Exception):
-                await sweep_task
+    async def _stop_background_tasks() -> None:
+        """Отмена и завершение drain_task и sweep_task."""
+        tasks = [t for t in (drain_task, sweep_task) if t]
+        for t in tasks:
+            t.cancel()
 
-    async def _run() -> None:
-        await _stop_drain_and_sweep()
+        for t in tasks:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await t
+
+    async def _shutdown_container_and_clients() -> None:
         if container:
-            vllm_client = await container.get(IVLLMAdapter)
-            await vllm_client.close()
-            await container.close()
+            # Закрываем VLLM-клиент
+            try:
+                vllm_client = await container.get(IVLLMAdapter)
+                await vllm_client.close()
+            except Exception as e:
+                logger and logger.warning(f"Ошибка при закрытии VLLM-клиента: {e!r}")
 
-    run_coroutine(_run())
+            # Закрываем сам контейнер
+            try:
+                await container.close()
+            except Exception as e:
+                logger and logger.warning(f"Ошибка при закрытии контейнера: {e!r}")
+
+    async def _run_shutdown() -> None:
+        await _stop_background_tasks()
+        await _shutdown_container_and_clients()
+        # Останавливаем глобальный loop в отдельном потоке
+        loop.call_soon_threadsafe(loop.stop)
+
+    # Запускаем shutdown в глобальном loop и ждем завершения
+    run_coroutine(_run_shutdown())

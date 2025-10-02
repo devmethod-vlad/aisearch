@@ -202,7 +202,7 @@ class LLMQueue(ILLMQueue):
                 updated_at = 0
 
             # Реальные «подвисшие» состояния — queued/running без движения
-            if state in {"queued", "running"} and now - updated_at >= stale_sec:
+            if state in {"queued"} and now - updated_at >= stale_sec:
                 await self.requeue(ticket_id, reason="sweep: stale in processing")
                 requeued += 1
 

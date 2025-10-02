@@ -324,6 +324,7 @@ class MilvusDatabase(IVectorDatabase):
         metadata: pd.DataFrame | None = None,
     ) -> None:
         """Индексация документов в vector_db."""
+        self.logger.info("ПРОИСХОДИТ ИНДЕКСАЦИЯ")
         embeddings = model.encode(documents, normalize_embeddings=True)
         embeddings = np.vstack([l2_normalize(e) for e in embeddings])
 
@@ -339,46 +340,64 @@ class MilvusDatabase(IVectorDatabase):
         )
 
     async def ensure_collection(
-        self,
-        collection_name: str,
-        model: SentenceTransformer,
-        documents: list[str],
-        metadata: pd.DataFrame | None = None,
-        recreate: bool = False,
+            self,
+            collection_name: str,
+            model: SentenceTransformer,
+            documents: list[str] | None = None,
+            metadata: pd.DataFrame | None = None,
+            recreate: bool = False,
     ) -> None:
-        """Гарантирует готовность коллекции (актуальная модель) и пересоздаёт при необходимости"""
-        self.logger.info(await self.get_model_metadata())
+        """Гарантирует готовность коллекции.
+
+        Поведение:
+        - recreate=True → пересоздание коллекции с документами
+        - если коллекция не существует → создаётся и индексируется
+        - если коллекция есть → просто load_collection
+        - если модель не совпадает → логируем warning, но НЕ пересоздаём
+        """
 
         if recreate:
-            self.logger.info("Пересоздание коллекции (recreate=True) ...")
+            self.logger.info(f"Пересоздание коллекции {collection_name} (recreate=True) ...")
             if await self.collection_ready(collection_name):
                 await self.delete_collection(collection_name=collection_name)
-
+            if documents is None:
+                raise ValueError("Для recreate=True нужно передать documents")
             await self.initialize_collection(
                 collection_name=collection_name, model=model, documents=documents, metadata=metadata
             )
             return
 
-        # Если recreate = False, проверяем существование и модель
+        # Проверяем существование
         if not await self.collection_ready(collection_name):
-            self.logger.info("Коллекция не существует, создание новой ...")
+            self.logger.info(f"Коллекция {collection_name} не существует, создаём ...")
+            if documents is None:
+                raise ValueError("Для создания новой коллекции нужны documents")
             await self.initialize_collection(
                 collection_name=collection_name, model=model, documents=documents, metadata=metadata
             )
             return
 
-        # Коллекция существует, проверяем модель
+        # Коллекция существует → просто load_collection
+        if collection_name not in self.__collections_loaded:
+            await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+            self.__collections_loaded.add(collection_name)
+            self.logger.info(f"Коллекция {collection_name} подгружена в память")
+
+        # Проверка модели (но без пересоздания!)
         try:
             current_model_name = await self.get_model_by_collection(collection_name)
+            expected_model_name = MilvusDatabase.get_model_name(model)
+            if current_model_name != expected_model_name:
+                self.logger.warning(
+                    f"Коллекция {collection_name} создана с моделью {current_model_name}, "
+                    f"а текущая модель {expected_model_name}. "
+                    f"Поиск будет выполняться, но результаты могут быть некорректны."
+                )
         except NotFoundError:
-            self.logger.info(
-                f"Коллекция {collection_name} существует, но не найдена связанная модель. Пересоздаём ..."
+            self.logger.warning(
+                f"Коллекция {collection_name} существует, но модель не найдена в метаданных. "
+                f"Рекомендуется пересоздать коллекцию вручную."
             )
-            await self.delete_collection(collection_name=collection_name)
-            await self.initialize_collection(
-                collection_name=collection_name, model=model, documents=documents, metadata=metadata
-            )
-            return
 
         # Модель успешно получена, проверяем, совпадает ли она
         expected_model_name = MilvusDatabase.get_model_name(model)
