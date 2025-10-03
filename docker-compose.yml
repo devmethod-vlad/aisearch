@@ -57,7 +57,7 @@ services:
 
     healthcheck:
       test: [ "CMD-SHELL", "celery -A app.infrastructure.worker.worker:worker inspect ping -d \"celery@$(hostname)\" --timeout=5 | grep -q pong" ]
-      interval: 10s
+      interval: 5s
       timeout: 5s
       retries: 5
       start_period: 30s

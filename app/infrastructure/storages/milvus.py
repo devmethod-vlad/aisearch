@@ -1,4 +1,4 @@
-import asyncio
+import asyncio,  time
 import typing as tp
 
 import numpy as np
@@ -24,19 +24,24 @@ class MilvusDatabase(IVectorDatabase):
     """Класс для работы с Milvus DB с использованием AsyncMilvusClient."""
 
     def __init__(self, settings: MilvusSettings, logger: AISearchLogger):
+        start_init = time.perf_counter()
         self.config = settings
         self.logger = logger
 
+        start_client = time.perf_counter()
         self.client = AsyncMilvusClient(
             uri=f"http{'s' if self.config.use_ssl else ''}://{self.config.host}:{self.config.port}",
             timeout=self.config.connection_timeout,
         )
-
+        end_client = time.perf_counter()
+        print(f"Время, затраченное на инициализацию клиента Milvus {start_client - end_client:.6f} секунд")
         self.__collections_loaded = set()
 
         # Инициализация выполняется асинхронно
         asyncio.create_task(self.initialize_model_metadata_collection())
         asyncio.create_task(self.preload_collections())
+        end_init = time.perf_counter()
+        print(f"Общее время init для Milvus адаптера {start_init - end_init:.6f} секунд")
 
     @staticmethod
     def get_model_name(model: SentenceTransformer) -> str:
@@ -250,6 +255,7 @@ class MilvusDatabase(IVectorDatabase):
 
     async def initialize_model_metadata_collection(self) -> None:
         """Инициализация коллекции для метаданных модели."""
+        start_metadata = time.perf_counter()
         collections = await self.client.list_collections(timeout=self.config.query_timeout)
 
         if "model_metadata" not in collections:
@@ -287,9 +293,12 @@ class MilvusDatabase(IVectorDatabase):
         # Загружаем коллекцию
         await self.client.load_collection("model_metadata", timeout=self.config.query_timeout)
         self.__collections_loaded.add("model_metadata")
+        end_metadata = time.perf_counter()
+        print(f"Время, затраченное на initialize_model_metadata_collection Milvus {end_metadata - start_metadata:.6f} секунд")
 
     async def preload_collections(self) -> None:
         """Предзагрузка коллекций в память"""
+        start_preload = time.perf_counter()
         for collection_name in self.config.preloaded_collection_names:
             try:
                 self.logger.info(f"Загрузка коллекции {collection_name} ...")
@@ -300,6 +309,8 @@ class MilvusDatabase(IVectorDatabase):
                 self.logger.info(f"Коллекция {collection_name} успешно загружена")
             except Exception as e:
                 self.logger.warning(f"Не удалось загрузить коллекцию {collection_name}: {e}")
+        end_preload = time.perf_counter()
+        print(f"Время, затраченное на preload_collections Milvus {end_preload - start_preload:.6f} секунд")
 
     async def get_model_metadata(self, limit: int = 10) -> list[dict[str, tp.Any]]:
         """Получение результатов model_metadata"""

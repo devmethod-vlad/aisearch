@@ -6,6 +6,7 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 from starlette.requests import Request
 
+from app.api.v1.dto.requests.search import SearchRequest
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.services.interfaces import IHybridSearchService
 from app.settings.config import settings
@@ -16,15 +17,16 @@ router = APIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
 
 
 @router.post("/search", response_model=TaskResponse)
-@limiter.limit(settings.slowapi.search, key_func=get_remote_address)
+# @limiter.limit(settings.slowapi.search, key_func=get_remote_address)
 @inject
 async def get_documents(
     request: Request,
-    query: str,
-    top_k: int = 5,
+    body: SearchRequest,
     service: FromDishka[IHybridSearchService] = None,
 ) -> JSONResponse:
     """Выполняет гибридный поиск. Ставит задачу в очередь и возвращает ticket_id."""
+    query = body.query
+    top_k = body.top_k
     response = await service.enqueue_search(query=query, top_k=top_k)
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 

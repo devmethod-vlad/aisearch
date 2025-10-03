@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 import json
 import typing as tp
+import time
 
 from sentence_transformers import SentenceTransformer
 
@@ -60,34 +61,52 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             await self.queue.ack(ticket_id)
             return {"status": "error", "error": "missing pack"}
 
+        start_norm = time.perf_counter()
         pack = json.loads(raw)
         query = normalize_query(pack["query"])
         query_hash = hash_query(query)
         top_k = int(pack["top_k"])
+        end_norm = time.perf_counter()
+        print(f"Время, затраченное на нормализацию запроса {end_norm - start_norm:.6f} секунд")
         need_ack = True
         try:
             async with self.sem.acquire():
-                query_vector = (await asyncio.to_thread(model.encode, [query], convert_to_numpy=True))[0]
                 cache_key = f"hyb:{query_hash}:{top_k}:{self.settings.version}"
                 cached = await self.redis.get(cache_key)
+                cached = ''
                 if cached:
+                    print("Запрос кеширован. Выдаем готовый результат.")
                     results = [SearchResult(**x) for x in json.loads(cached)]
                 else:
+                    start_vector = time.perf_counter()
+                    query_vector = (await asyncio.to_thread(model.encode, [query], convert_to_numpy=True))[0]
+                    end_vector = time.perf_counter()
+                    print(f"Время, затраченное на векторизацию запроса {end_vector - start_vector:.6f} секунд")
+                    start_milvus = time.perf_counter()
                     dense = await self.vector_db.search(
                         collection_name=self.settings.collection_name,
                         query_vector=query_vector,
                         top_k=top_k,
                     )
+                    end_milvus = time.perf_counter()
+                    print(f"Время, затраченное на поиск в Milvus {end_milvus - start_milvus:.6f} секунд")
                     lex = []
                     if self.switches.use_hybrid:
                         if self.switches.use_opensearch:
+                            start_opensearch = time.perf_counter()
                             lex = await self._os_candidates(query, self.settings.lex_top_k)
+                            end_opensearch = time.perf_counter()
+                            print(f"Время, затраченное на поиск в opensearch {end_opensearch - start_opensearch:.6f} секунд")
                         elif self.switches.use_bm25:
                             lex = await self._bm25_candidates(query, self.settings.lex_top_k)
                     merged = self._merge_candidates(dense, lex)
                     if self.switches.use_reranker and merged:
                         pairs = [(query, self._concat_text(m)) for m in merged]
+                        start_rerank = time.perf_counter()
                         ce_scores = await asyncio.to_thread(self.ce.rank, pairs)
+                        end_rerank = time.perf_counter()
+                        print(
+                            f"Время, затраченное на реранжирование {end_rerank - start_rerank:.6f} секунд")
                         for m, s in zip(merged, ce_scores):
                             m["score_ce"] = float(s)
                     _results = self._score_and_slice(

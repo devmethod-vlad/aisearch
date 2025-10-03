@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import time
 import typing as tp
 
 from celery import shared_task
 from dishka import AsyncContainer
+import redis.asyncio as redis
+
 
 from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.logger import AISearchLogger, LoggerType
@@ -27,7 +30,7 @@ from app.settings.config import (
     HybridSearchSettings,
     SearchSwitches,
     VLLMSettings,
-    settings as _settings,
+    settings as _settings, settings,
 )
 
 
@@ -38,32 +41,40 @@ def search_task(
     """Выполняет гибридный поиск в фоновом режиме."""
 
     async def _run() -> dict[str, tp.Any]:
-        container: AsyncContainer | None = getattr(self, "_container", None)
-        if not container:
-            raise self.retry(exc=Exception("Dishka container not initialized"), countdown=5)
+        start = time.perf_counter()
+        redis_watcher = redis.from_url(str(settings.redis.dsn))
+        tprefix = settings.llm_queue.ticket_hash_prefix
+        pkey =  settings.llm_queue.processing_list_key or f"{settings.llm_queue.queue_list_key}:processing"
 
-        logger = AISearchLogger(logger_type=LoggerType.CELERY)
-        logger.info("Начало выполнения задачи 'search_task'...")
         try:
+            container: AsyncContainer | None = getattr(self, "_container", None)
+            if not container:
+                raise self.retry(exc=Exception("Dishka container not initialized"), countdown=5)
+
+            logger = AISearchLogger(logger_type=LoggerType.CELERY)
+            logger.info("Начало выполнения задачи 'search_task'...")
+
             orchestrator = await container.get(IHybridSearchOrchestrator)
-        except Exception as e:
-            logger.info(f"Оркестратор не проинициализирован с ошибкой {e}")
-            queue: ILLMQueue = await container.get(ILLMQueue)
-            await queue.set_failed(ticket_id, f"send_task(search) error: {e!r}")
-            await queue.ack(ticket_id)
+            task_id = getattr(self, "task_id", None) or getattr(self.request, "id", "")
+            result = await orchestrator.documents_search(
+                task_id=task_id,
+                ticket_id=ticket_id,
+                pack_key=pack_key,
+                result_key=result_key,
+                model=self._model,
+            )
+
+            logger.info("Задача 'search_task' выполнена")
+            end = time.perf_counter()
+            print(f"Общее время, затраченное на задачу search_task {end - start:.6f} секунд")
+            return result
+        except Exception as error:
+            redis_watcher.hset(
+                f"{tprefix}{ticket_id}",
+                mapping={"state": "failed", "error": error, "updated_at": int(time.time())},
+            )
+            redis_watcher.lrem(pkey, 1, ticket_id)
             return {"status": "failed"}
-
-        task_id = getattr(self, "task_id", None) or getattr(self.request, "id", "")
-        result = await orchestrator.documents_search(
-            task_id=task_id,
-            ticket_id=ticket_id,
-            pack_key=pack_key,
-            result_key=result_key,
-            model=self._model,
-        )
-
-        logger.info("Задача 'search_task' выполнена")
-        return result
 
     return run_coroutine(_run())
 
