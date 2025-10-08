@@ -19,7 +19,7 @@ from app.infrastructure.providers import (
     LoggerProvider,
     RedisProvider,
 )
-from app.infrastructure.utils.nlp import download_nltk_resources
+from app.infrastructure.utils.nlp import download_nltk_resources, init_nltk_resources
 from app.settings.config import (
     AppSettings,
     CelerySettings,
@@ -39,7 +39,7 @@ async def lifespan(application: FastAPI) -> tp.AsyncGenerator[None, None]:
     container = application.state.dishka_container
     async with container() as request_container:
         logger = await request_container.get(AISearchLogger)
-        download_nltk_resources()
+        init_nltk_resources()
         await load_collection_and_index(settings=settings, logger=logger)
         yield
 

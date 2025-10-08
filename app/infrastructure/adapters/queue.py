@@ -147,8 +147,9 @@ class LLMQueue(ILLMQueue):
         data["approx_position"] = pos
         return data
 
-    async def dequeue_blocking(self, timeout: int = 0) -> tuple[str, dict[str, tp.Any]] | None:
+    async def dequeue_blocking(self, timeout: float = 0.2) -> tuple[str, dict[str, tp.Any]] | None:
         """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
+
         raw_tid = await self.redis.brpoplpush(self.qkey, self.pkey, timeout=timeout)
         if not raw_tid:
             return None

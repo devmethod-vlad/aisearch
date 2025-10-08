@@ -14,6 +14,9 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
 )
+from sentence_transformers import CrossEncoder
+
+from app.services.interfaces import IHybridSearchOrchestrator
 
 if TYPE_CHECKING:
     from dishka import AsyncContainer
@@ -23,11 +26,12 @@ from dishka import AsyncContainer, make_async_container
 from app.common.logger import AISearchLogger, LoggerType
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import ILLMQueue, IVLLMAdapter
-from app.infrastructure.utils.nlp import download_nltk_resources
+from app.infrastructure.utils.nlp import download_nltk_resources, init_nltk_resources
 from app.settings.config import HybridSearchSettings, Settings, settings
 
 container: AsyncContainer | None = None
 model: tp.Any | None = None
+ce_model: tp.Any | None = None
 drain_task: asyncio.Task | None = None
 logger: AISearchLogger | None = None
 sweep_task: asyncio.Task | None = None
@@ -45,8 +49,12 @@ worker.conf.update(
     result_serializer="json",
     accept_content=["json"],
     timezone="UTC",
-    task_queues={"default": {"exchange": "default", "routing_key": "default"}},
-    task_routes={"search_task": {"queue": "default"}, "generate_task": {"queue": "default"}},
+    task_queues={"gpu-search": {"exchange": "gpu-search", "routing_key": "gpu-search"}},
+    task_routes={
+        "main_worker_health_check": {"queue": "gpu-search"},
+        "search_task": {"queue": "gpu-search"},
+        "generate-answer-vllm": {"queue": "gpu-search"},
+    },
     result_expires=600,
 )
 
@@ -61,12 +69,12 @@ def on_after_configure(**kwargs: dict[str, tp.Any]) -> None:
     """Код, выполняющийся после инициализации Celery и его настроек"""
     global logger  # noqa: PLW0603
     logger = AISearchLogger(logger_type=LoggerType.CELERY)
-    download_nltk_resources()
+    init_nltk_resources()
 
 
 def init_container_and_model() -> AsyncContainer:
     """Инициализация контейнера Dishka"""
-    global container, model  # noqa: PLW0603
+    global container, model, ce_model  # noqa: PLW0603
     from app.infrastructure.ioc import ApplicationProvider
     from app.infrastructure.providers import (
         LoggerProvider,
@@ -104,123 +112,17 @@ def init_container_and_model() -> AsyncContainer:
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(settings.milvus.model_name)
+    model.encode(["warmup"], convert_to_numpy=True)
+
     logger.info("Модель успешно загружена")
+    ce_model = CrossEncoder(settings.reranker.model_name, device=settings.reranker.device)
+    logger.info("Кросс-энкодер загружен")
     return container
 
 
 def run_coroutine(coro: tp.Coroutine) -> Future:
     """Запуск корутин в общем event loop."""
     return asyncio.run_coroutine_threadsafe(coro, loop).result()
-
-
-async def _queue_drain_loop() -> None:
-    """Фоновая корутина: ждёт тикеты блокирующе и стартует celery-задачи."""
-    assert container is not None
-    queue = await container.get(ILLMQueue)
-    logger = await container.get(AISearchLogger)
-    async_redis_storage = await container.get(KeyValueStorageProtocol)
-    while True:
-        try:
-            item = await queue.dequeue_blocking(timeout=5)
-            if not item:
-                await asyncio.sleep(0.1)
-                continue
-
-            ticket_id, payload = item
-            if (
-                not isinstance(payload, dict)
-                or "pack_key" not in payload
-                or "result_key" not in payload
-            ):
-                await queue.set_failed(ticket_id, "Invalid payload: missing pack_key or result_key")
-                await queue.ack(ticket_id)
-
-                continue
-            pack_key = payload["pack_key"]
-            raw = await async_redis_storage.get(pack_key)
-            pack = json.loads(raw)
-            task_type = pack.get("type")
-
-            if task_type == "search":
-                try:
-                    worker.send_task(
-                        "search_task",
-                        args=(ticket_id, payload["pack_key"], payload["result_key"]),
-                        queue="default",
-                        task_id=ticket_id,
-                    )
-                except Exception as e:
-                    await queue.set_failed(ticket_id, f"send_task(search) error: {e!r}")
-                    await queue.ack(ticket_id)
-
-            elif task_type == "generate":
-                try:
-                    worker.send_task(
-                        "generate_task",
-                        args=(ticket_id, payload["pack_key"], payload["result_key"]),
-                        queue="default",
-                        task_id=ticket_id,
-                    )
-                except Exception as e:
-                    await queue.set_failed(ticket_id, f"send_task(generate) error: {e!r}")
-                    await queue.ack(ticket_id)
-
-            else:
-
-                await queue.set_failed(ticket_id, f"unknown task type: {task_type!r}")
-                await queue.ack(ticket_id)
-        except Exception as e:
-            logger.error(f"{e} - ошибка в drain queue loop")
-            await asyncio.sleep(1)
-
-
-async def _processing_sweeper(period_sec: int = 10, stale_sec: int = 60) -> None:
-    """Очистка протухших тикетов и перестановка в начало очереди"""
-    assert container is not None
-    queue = await container.get(ILLMQueue)
-    _logger = await container.get(AISearchLogger)
-    while True:
-        try:
-            n = await queue.sweep_processing(stale_sec=stale_sec)
-            if n:
-                _logger.warning(f"sweep_processing: requeued {n} stale tickets")
-        except Exception as e:
-            _logger.error(f"sweep_processing error: {e!r}")
-        await asyncio.sleep(period_sec)
-
-
-def spawn_supervised(
-    name: str,
-    coro_factory: tp.Callable[[], tp.Awaitable[None]],
-    log,
-    *,
-    backoff_initial: float = 0.5,
-    backoff_max: float = 30.0,
-) -> Future:
-    """
-    Запускает корутину с автоперезапуском при крэше.
-    coro_factory ДОЛЖНА возвращать НОВУЮ корутину при каждом вызове.
-    """
-
-    async def _runner() -> None:
-        delay = backoff_initial
-        while True:
-            try:
-                log.info(f"[supervisor] start {name}")
-                await coro_factory()
-                log.warning(f"[supervisor] {name} exited; restart in 1s")
-                delay = backoff_initial
-                await asyncio.sleep(1.0)
-            except asyncio.CancelledError:
-                log.info(f"[supervisor] {name} cancelled")
-                raise
-            except Exception as e:
-                log.exception(f"[supervisor] {name} crashed: {e!r}; restart in {delay:.1f}s")
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, backoff_max)
-
-    # важно: запускаем в глобальном loop через thread-safe API
-    return asyncio.run_coroutine_threadsafe(_runner(), loop)
 
 
 @worker_process_init.connect
@@ -235,16 +137,13 @@ def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
 
     threading.Thread(target=_start_loop, daemon=True).start()
 
-    # теперь можно запускать фоновые supervised задачи
-    drain_task = spawn_supervised("drain", lambda: _queue_drain_loop(), logger)
-    sweep_task = spawn_supervised("sweeper", lambda: _processing_sweeper(), logger)
-
 
 @task_prerun.connect
 def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any]) -> None:
     """Процесс перед выполнением задачи"""
     task._container = container
     task._model = model
+    task._ce_model = ce_model
     task.task_id = task_id
 
 
@@ -285,3 +184,24 @@ def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
 
     # Запускаем shutdown в глобальном loop и ждем завершения
     run_coroutine(_run_shutdown())
+
+
+
+@worker.task(name='main_worker_health_check')
+def health_check():
+    """Healthcheck задача, которая проверяет готовность воркера"""
+    global container, model, ce_model
+    
+    checks = {
+        "container_ready": container is not None,
+        "model_loaded": model is not None,
+        "ce_model_loaded": ce_model is not None,
+        "event_loop_running": loop.is_running() if loop else False
+    }
+    
+    all_healthy = all(checks.values())
+    
+    return {
+        "status": "healthy" if all_healthy else "unhealthy",
+        "checks": checks
+    }

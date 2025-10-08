@@ -34,6 +34,7 @@ from app.settings.config import (
 )
 
 
+
 @shared_task(name="search_task", bind=True, max_retries=3)
 def search_task(
     self: tp.Callable, ticket_id: str, pack_key: str, result_key: str
@@ -41,7 +42,6 @@ def search_task(
     """Выполняет гибридный поиск в фоновом режиме."""
 
     async def _run() -> dict[str, tp.Any]:
-        start = time.perf_counter()
         redis_watcher = redis.from_url(str(settings.redis.dsn))
         tprefix = settings.llm_queue.ticket_hash_prefix
         pkey =  settings.llm_queue.processing_list_key or f"{settings.llm_queue.queue_list_key}:processing"
@@ -62,18 +62,17 @@ def search_task(
                 pack_key=pack_key,
                 result_key=result_key,
                 model=self._model,
+                ce_model=self._ce_model
             )
 
             logger.info("Задача 'search_task' выполнена")
-            end = time.perf_counter()
-            print(f"Общее время, затраченное на задачу search_task {end - start:.6f} секунд")
             return result
         except Exception as error:
-            redis_watcher.hset(
+            await redis_watcher.hset(
                 f"{tprefix}{ticket_id}",
                 mapping={"state": "failed", "error": error, "updated_at": int(time.time())},
             )
-            redis_watcher.lrem(pkey, 1, ticket_id)
+            await redis_watcher.lrem(pkey, 1, ticket_id)
             return {"status": "failed"}
 
     return run_coroutine(_run())

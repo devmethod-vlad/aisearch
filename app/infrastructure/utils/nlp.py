@@ -19,8 +19,9 @@ def configure_nltk_paths() -> Path:
         nltk.data.path.insert(0, str(p))
     return p
 
-def assert_nltk_resources_present() -> None:
-    """Проверка наличия необходимых ресурсов"""
+
+def assert_nltk_resources_present() -> list[str]:
+    """Проверка наличия необходимых ресурсов (возвращает отсутствующие)"""
     needed = {
         "punkt": "tokenizers/punkt",
         "punkt_tab": "tokenizers/punkt_tab",
@@ -32,15 +33,25 @@ def assert_nltk_resources_present() -> None:
             nltk.data.find(path)
         except LookupError:
             missing.append(name)
-    if missing:
-        raise RuntimeError(f"Отсутствуют NLTK-ресурсы: {', '.join(missing)} "
-                           f"в {nltk.data.path!r}")
+    return missing
 
 
-def download_nltk_resources() -> None:
+def download_nltk_resources(resources: list[str]) -> None:
+    for recource in resources:
+        nltk.download(recource)
+
+
+def init_nltk_resources() -> None:
     """Загрузка ресурсов NLTK при инициализации приложения"""
     configure_nltk_paths()
-    assert_nltk_resources_present()
+    missing = assert_nltk_resources_present()
+    if missing:
+        download_nltk_resources(missing)
+    missing = assert_nltk_resources_present()
+    if missing:
+        raise RuntimeError(
+            f"Не удалось установить NLTK-ресурсы: {', '.join(missing)} " f"в {nltk.data.path!r}"
+        )
 
 
 def hash_query(normalized_query: str) -> str:

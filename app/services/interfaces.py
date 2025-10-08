@@ -2,7 +2,7 @@ import abc
 import typing as tp
 from typing import Optional
 
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 
@@ -47,5 +47,12 @@ class IHybridSearchOrchestrator(abc.ABC):
         pack_key: str,
         result_key: str,
         model: SentenceTransformer,
+        ce_model: CrossEncoder,
     ) -> dict[str, tp.Any]:
         """Поиск по документам"""
+
+    # @abc.abstractmethod
+    # def initialize_orchestrator(
+    #         self
+    # ) -> None:
+    #     """Инициализация оркестратора"""

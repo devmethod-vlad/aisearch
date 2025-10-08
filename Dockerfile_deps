@@ -16,8 +16,10 @@ RUN uv pip install --system --no-cache-dir \
     --index-url https://download.pytorch.org/whl/${CUDA_WHEEL} \
     torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1
 
-WORKDIR /deps
+WORKDIR /backend
+
 COPY pyproject.toml ./
+
 RUN uv pip compile pyproject.toml -o requirements.lock \
  && uv pip sync --system requirements.lock
 

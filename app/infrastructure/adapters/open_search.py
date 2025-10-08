@@ -5,7 +5,7 @@ from opensearchpy import (
     OpenSearch,
     helpers as os_helpers,
 )
-import time
+
 from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import IOpenSearchAdapter
 from app.settings.config import Settings
@@ -15,7 +15,6 @@ class OpenSearchAdapter(IOpenSearchAdapter):
     """Адаптер для opensearch"""
 
     def __init__(self, settings: Settings, logger: AISearchLogger):
-        start_init = time.perf_counter()
         self.config = settings.opensearch
         self.client = OpenSearch(
             hosts=[{"host": self.config.host, "port": self.config.port}],
@@ -25,8 +24,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
             verify_certs=self.config.verify_certs,
         )
         self.logger = logger
-        end_init = time.perf_counter()
-        print(f"Общее время init для OpenSearchAdapter {start_init - end_init:.6f} секунд")
+        print("ИНИЦИАЛИЗАЦИЯ OPENSEARCH")
 
     def build_index(self, data: pd.DataFrame) -> None:
         """Построение индекса"""

@@ -4,6 +4,7 @@ import typing as tp
 import numpy as np
 import pandas as pd
 import torch
+from sentence_transformers import CrossEncoder
 
 from app.common.logger import AISearchLogger
 
@@ -58,7 +59,7 @@ class ILLMQueue(abc.ABC):
         """Получение статуса задачи"""
 
     @abc.abstractmethod
-    async def dequeue_blocking(self, timeout: int = 0) -> tuple[str, dict[str, tp.Any]] | None:
+    async def dequeue_blocking(self, timeout: float = 0.2) -> tuple[str, dict[str, tp.Any]] | None:
         """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
 
     @abc.abstractmethod
@@ -132,5 +133,5 @@ class ICrossEncoderAdapter(abc.ABC):
     """Адаптер кросс-энкодера"""
 
     @abc.abstractmethod
-    def rank(self, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
+    def rank(self, model: CrossEncoder, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
         """Реранжирование"""

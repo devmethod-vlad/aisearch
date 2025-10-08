@@ -17,9 +17,6 @@ venv
 __pycache__
 /tests/tmp
 celerybeat-schedule
-/models/
-/hf-cache/
 bm25index
 poetry.lock
 *.xlsx
-/nltk/

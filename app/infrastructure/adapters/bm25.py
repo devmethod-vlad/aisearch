@@ -1,4 +1,4 @@
-import pickle, time
+import pickle
 import typing as tp
 
 import numpy as np
@@ -15,15 +15,13 @@ class BM25Adapter(IBM25Adapter):
     """Адаптер bm25 на rank_bm25"""
 
     def __init__(self, settings: Settings, logger: AISearchLogger):
-        start_init = time.perf_counter()
         self.index_path = settings.bm25.index_path
         self.schema_fields = settings.bm25.schema_fields
         self._ix: BM25Okapi | None = None
         self._data: pd.DataFrame | None = None
         self.ensure_index() if settings.switches.use_bm25 else None
         self.logger = logger
-        end_init = time.perf_counter()
-        print(f"Общее время init для BM25Adapter адаптера {start_init - end_init:.6f} секунд")
+        print("ИНИЦИАЛИЗАЦИЯ BM25")
 
     @staticmethod
     def build_index(
@@ -48,7 +46,6 @@ class BM25Adapter(IBM25Adapter):
 
     def ensure_index(self) -> None:
         """Подгрузка индекса"""
-        start_index = time.perf_counter()
         try:
             with open(f"{self.index_path}/bm25.pkl", "rb") as f:
                 bm25_pack = pickle.load(f)
@@ -56,8 +53,6 @@ class BM25Adapter(IBM25Adapter):
             self._data = pd.read_parquet(f"{self.index_path}/rows.parquet")
         except Exception as e:
             self.logger.warning(f"Не удалось подгрузить индексы из {self.index_path}, error: {e}")
-        end_index = time.perf_counter()
-        print(f"Время, затраченное на ensure_index для BM25Adapter {start_index - end_index:.6f} секунд")
 
     def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
         """Возвращает список кандидатов:

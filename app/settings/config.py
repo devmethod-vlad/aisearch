@@ -23,7 +23,7 @@ class AppSettings(EnvBaseSettings):
     workers_num: int
     access_key: str
     prefix: str = ""
-
+    use_cache: bool = True
     logs_host_path: str
     logs_contr_path: str
 

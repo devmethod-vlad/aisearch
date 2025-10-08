@@ -33,7 +33,7 @@
     APP_PREFIX=
     APP_LOGS_HOST_PATH=./logs/app
     APP_LOGS_CONTR_PATH=/usr/src/logs/app
-
+    APP_USE_CACHE=false  # Использовать ли кэширование
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
 
@@ -122,7 +122,7 @@
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000
     OS_RECREATE_INDEX=true
-
+    
     NLTK_DATA_HOST_PATH=E:/nltk    # выкачка ресурсов через python -m nltk.downloader -d путь_к_папке punkt stopwords punkt_tab
     NLTK_DATA_CONTR_PATH=/srv/nltk_data
     

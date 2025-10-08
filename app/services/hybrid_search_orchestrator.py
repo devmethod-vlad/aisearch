@@ -2,9 +2,8 @@ import asyncio
 import contextlib
 import json
 import typing as tp
-import time
 
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.storages.interfaces import KeyValueStorageProtocol
@@ -44,6 +43,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.redis = redis
         self.settings = settings.hybrid
         self.switches = settings.switches
+        self.use_cache = settings.app.use_cache
+
+    # def initialize_orchestrator(self):
+    #     print("Инициализация оркестратора")
 
     async def documents_search(
         self,
@@ -52,91 +55,185 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         pack_key: str,
         result_key: str,
         model: SentenceTransformer,
+        ce_model: CrossEncoder,
     ) -> dict[str, str]:
         """Поиск по документам"""
+        import time
+        start_total = time.perf_counter()
+
         await self.queue.set_running(ticket_id, task_id)
+
+        # Получение pack из Redis
+        redis_get_start = time.perf_counter()
         raw = await self.redis.get(pack_key)
+        redis_get_time = time.perf_counter() - redis_get_start
+        print(f"⏱️  Redis GET pack: {redis_get_time:.4f} сек")
+
         if not raw:
             await self.queue.set_failed(ticket_id, "missing pack")
             await self.queue.ack(ticket_id)
             return {"status": "error", "error": "missing pack"}
 
-        start_norm = time.perf_counter()
+        # Парсинг JSON
+        json_parse_start = time.perf_counter()
         pack = json.loads(raw)
+        json_parse_time = time.perf_counter() - json_parse_start
+        print(f"⏱️  JSON parse: {json_parse_time:.4f} сек")
+        normalize_start_time = time.perf_counter()
         query = normalize_query(pack["query"])
         query_hash = hash_query(query)
         top_k = int(pack["top_k"])
-        end_norm = time.perf_counter()
-        print(f"Время, затраченное на нормализацию запроса {end_norm - start_norm:.6f} секунд")
         need_ack = True
+        normalize_end_time = time.perf_counter()
+        norm_time = normalize_end_time - normalize_start_time
+        print(f"⏱️  NORMALIZE_TIME: {norm_time:.4f} сек")
         try:
+            # Ожидание семафора
+            sem_acquire_start = time.perf_counter()
             async with self.sem.acquire():
+                sem_acquire_time = time.perf_counter() - sem_acquire_start
+                print(f"⏱️  Semaphore acquire: {sem_acquire_time:.4f} сек")
+
+                # Векторизация запроса
+                encode_start = time.perf_counter()
+                query_vector = (await asyncio.to_thread(model.encode, [query], convert_to_numpy=True))[0]
+                encode_time = time.perf_counter() - encode_start
+                print(f"⏱️  Model encode: {encode_time:.4f} сек")
                 cache_key = f"hyb:{query_hash}:{top_k}:{self.settings.version}"
-                cached = await self.redis.get(cache_key)
-                cached = ''
-                if cached:
-                    print("Запрос кеширован. Выдаем готовый результат.")
-                    results = [SearchResult(**x) for x in json.loads(cached)]
+                if self.use_cache:
+                    cache_get_start = time.perf_counter()
+                    cached = await self.redis.get(cache_key)
+                    cache_get_time = time.perf_counter() - cache_get_start
+                    print(f"⏱️  Cache GET: {cache_get_time:.4f} сек")
                 else:
-                    start_vector = time.perf_counter()
-                    query_vector = (await asyncio.to_thread(model.encode, [query], convert_to_numpy=True))[0]
-                    end_vector = time.perf_counter()
-                    print(f"Время, затраченное на векторизацию запроса {end_vector - start_vector:.6f} секунд")
-                    start_milvus = time.perf_counter()
+                    cached = None
+                if cached:
+                    print("✅ Используется кешированный результат")
+                    cache_parse_start = time.perf_counter()
+                    results = [SearchResult(**x) for x in json.loads(cached)]
+                    cache_parse_time = time.perf_counter() - cache_parse_start
+                    print(f"⏱️  Cache parse: {cache_parse_time:.4f} сек")
+                else:
+                    print("🔍 Выполняется новый поиск")
+                    # Векторный поиск
+                    vector_search_start = time.perf_counter()
                     dense = await self.vector_db.search(
                         collection_name=self.settings.collection_name,
                         query_vector=query_vector,
                         top_k=top_k,
                     )
-                    end_milvus = time.perf_counter()
-                    print(f"Время, затраченное на поиск в Milvus {end_milvus - start_milvus:.6f} секунд")
+                    vector_search_time = time.perf_counter() - vector_search_start
+                    print(f"⏱️  Vector search: {vector_search_time:.4f} сек")
+
                     lex = []
+                    lex_search_time = 0
+
+                    # Лексический поиск
                     if self.switches.use_hybrid:
+                        lex_search_start = time.perf_counter()
                         if self.switches.use_opensearch:
-                            start_opensearch = time.perf_counter()
                             lex = await self._os_candidates(query, self.settings.lex_top_k)
-                            end_opensearch = time.perf_counter()
-                            print(f"Время, затраченное на поиск в opensearch {end_opensearch - start_opensearch:.6f} секунд")
+                            print(f"🔍 OpenSearch candidates: {len(lex)} результатов")
                         elif self.switches.use_bm25:
                             lex = await self._bm25_candidates(query, self.settings.lex_top_k)
+                            print(f"🔍 BM25 candidates: {len(lex)} результатов")
+                        lex_search_time = time.perf_counter() - lex_search_start
+                        print(f"⏱️  Lexical search: {lex_search_time:.4f} сек")
+
+                    # Слияние результатов
+                    merge_start = time.perf_counter()
                     merged = self._merge_candidates(dense, lex)
+                    merge_time = time.perf_counter() - merge_start
+                    print(f"⏱️  Merge candidates: {merge_time:.4f} сек")
+                    print(f"📊 После слияния: {len(merged)} кандидатов")
+
+                    # Re-ranking
+                    rerank_time = 0
                     if self.switches.use_reranker and merged:
+                        print("🎯 Применяется re-ranking")
+                        rerank_start = time.perf_counter()
+
+                        pairs_prep_start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
-                        start_rerank = time.perf_counter()
-                        ce_scores = await asyncio.to_thread(self.ce.rank, pairs)
-                        end_rerank = time.perf_counter()
-                        print(
-                            f"Время, затраченное на реранжирование {end_rerank - start_rerank:.6f} секунд")
+                        pairs_prep_time = time.perf_counter() - pairs_prep_start
+                        print(f"⏱️  Pairs preparation: {pairs_prep_time:.4f} сек")
+
+                        ce_rank_start = time.perf_counter()
+                        ce_scores = await asyncio.to_thread(self.ce.rank, ce_model, pairs)
+                        ce_rank_time = time.perf_counter() - ce_rank_start
+                        print(f"⏱️  Cross-encoder rank: {ce_rank_time:.4f} сек")
+
                         for m, s in zip(merged, ce_scores):
                             m["score_ce"] = float(s)
+                        rerank_time = time.perf_counter() - rerank_start
+                        print(f"⏱️  Total re-ranking: {rerank_time:.4f} сек")
+
+                    # Финальная оценка и сортировка
+                    scoring_start = time.perf_counter()
                     _results = self._score_and_slice(
                         merged, top_k, use_ce=self.switches.use_reranker
                     )
-                    results = [SearchResult(**r) for r in _results]
-                    await self.redis.set(
-                        cache_key,
-                        json.dumps([r.model_dump() for r in results]),
-                        ttl=self.settings.cache_ttl,
-                    )
+                    scoring_time = time.perf_counter() - scoring_start
+                    print(f"⏱️  Final scoring: {scoring_time:.4f} сек")
 
+                    results = [SearchResult(**r) for r in _results]
+
+                    if self.use_cache:
+                        cache_set_start = time.perf_counter()
+                        await self.redis.set(
+                            cache_key,
+                            json.dumps([r.model_dump() for r in results]),
+                            ttl=self.settings.cache_ttl,
+                        )
+                        cache_set_time = time.perf_counter() - cache_set_start
+                        print(f"⏱️  Cache SET: {cache_set_time:.4f} сек")
+
+                # Сохранение результатов
+                result_prep_start = time.perf_counter()
                 payload = {"results": [r.model_dump() for r in results]}
+                result_prep_time = time.perf_counter() - result_prep_start
+                print(f"⏱️  Result preparation: {result_prep_time:.4f} сек")
+
+                result_set_start = time.perf_counter()
                 await self.redis.set(
                     result_key, json.dumps(payload, ensure_ascii=False), ttl=self.queue.ticket_ttl
                 )
-                await self.queue.set_done(ticket_id)
-                return {"status": "ok"}
-        except TimeoutError as e:
+                result_set_time = time.perf_counter() - result_set_start
+                print(f"⏱️  Result SET: {result_set_time:.4f} сек")
 
+                queue_done_start = time.perf_counter()
+                await self.queue.set_done(ticket_id)
+                queue_done_time = time.perf_counter() - queue_done_start
+                print(f"⏱️  Queue set done: {queue_done_time:.4f} сек")
+
+                total_time = time.perf_counter() - start_total
+                print(f"✅ ПОИСК ЗАВЕРШЕН: {total_time:.4f} сек")
+                print(f"📊 Итоговые результаты: {len(results)} документов")
+
+                return {"status": "ok"}
+
+        except TimeoutError as e:
+            timeout_time = time.perf_counter() - start_total
+            print(f"⏰ TIMEOUT через {timeout_time:.4f} сек: {e}")
             await self.queue.requeue(ticket_id, reason="global semaphore busy")
             need_ack = False
             return {"status": "requeued"}
         except Exception as e:
+            error_time = time.perf_counter() - start_total
+            print(f"❌ ОШИБКА через {error_time:.4f} сек: {e}")
             await self.queue.set_failed(ticket_id, str(e))
             raise
         finally:
             if need_ack:
+                ack_start = time.perf_counter()
                 with contextlib.suppress(Exception):
                     await self.queue.ack(ticket_id)
+                ack_time = time.perf_counter() - ack_start
+                print(f"⏱️  Queue ACK: {ack_time:.4f} сек")
+
+            final_total = time.perf_counter() - start_total
+            print(f"🏁 ОБЩЕЕ ВРЕМЯ ВЫПОЛНЕНИЯ: {final_total:.4f} сек")
+            print("=" * 60)
 
     async def _os_candidates(self, query: str, k: int) -> list[dict[str, tp.Any]]:
         os_adapter = self.os_adapter

@@ -11,12 +11,13 @@ ARG HTTPS_PROXY
 ENV http_proxy=${http_proxy} https_proxy=${https_proxy}\
     HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY}
 
-WORKDIR /deps
+WORKDIR /backend
+
 COPY pyproject.toml ./
+
 RUN uv pip compile pyproject.toml -o requirements.lock \
  && uv pip sync --system requirements.lock
 
-WORKDIR /backend
 COPY . /backend/
 
 ENV PYTHONPATH=/backend \

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
 
 
 @router.post("/search", response_model=TaskResponse)
-# @limiter.limit(settings.slowapi.search, key_func=get_remote_address)
+@limiter.limit(settings.slowapi.search, key_func=get_remote_address)
 @inject
 async def get_documents(
     request: Request,
