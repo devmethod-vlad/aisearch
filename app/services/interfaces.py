@@ -46,13 +46,9 @@ class IHybridSearchOrchestrator(abc.ABC):
         ticket_id: str,
         pack_key: str,
         result_key: str,
-        model: SentenceTransformer,
-        ce_model: CrossEncoder,
     ) -> dict[str, tp.Any]:
         """Поиск по документам"""
 
-    # @abc.abstractmethod
-    # def initialize_orchestrator(
-    #         self
-    # ) -> None:
-    #     """Инициализация оркестратора"""
+    @abc.abstractmethod
+    async def warmup(self) -> bool:
+        """Прогрев"""

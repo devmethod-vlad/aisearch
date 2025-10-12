@@ -61,8 +61,6 @@ def search_task(
                 ticket_id=ticket_id,
                 pack_key=pack_key,
                 result_key=result_key,
-                model=self._model,
-                ce_model=self._ce_model
             )
 
             logger.info("Задача 'search_task' выполнена")

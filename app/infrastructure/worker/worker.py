@@ -1,8 +1,5 @@
 from __future__ import annotations
-
 import asyncio
-import contextlib
-import json
 import threading
 import typing as tp
 from asyncio import Future
@@ -14,7 +11,6 @@ from celery.signals import (
     worker_process_init,
     worker_process_shutdown,
 )
-from sentence_transformers import CrossEncoder
 
 from app.services.interfaces import IHybridSearchOrchestrator
 
@@ -24,18 +20,14 @@ if TYPE_CHECKING:
 from dishka import AsyncContainer, make_async_container
 
 from app.common.logger import AISearchLogger, LoggerType
-from app.common.storages.interfaces import KeyValueStorageProtocol
-from app.infrastructure.adapters.interfaces import ILLMQueue, IVLLMAdapter
-from app.infrastructure.utils.nlp import download_nltk_resources, init_nltk_resources
+
+from app.infrastructure.adapters.interfaces import  IVLLMAdapter
+from app.infrastructure.utils.nlp import init_nltk_resources
 from app.settings.config import HybridSearchSettings, Settings, settings
 
 container: AsyncContainer | None = None
-model: tp.Any | None = None
-ce_model: tp.Any | None = None
-drain_task: asyncio.Task | None = None
 logger: AISearchLogger | None = None
-sweep_task: asyncio.Task | None = None
-
+successful_warmup: bool = False
 
 worker = Celery(
     "aisearch",
@@ -74,7 +66,7 @@ def on_after_configure(**kwargs: dict[str, tp.Any]) -> None:
 
 def init_container_and_model() -> AsyncContainer:
     """Инициализация контейнера Dishka"""
-    global container, model, ce_model  # noqa: PLW0603
+    global container  # noqa: PLW0603
     from app.infrastructure.ioc import ApplicationProvider
     from app.infrastructure.providers import (
         LoggerProvider,
@@ -108,15 +100,6 @@ def init_container_and_model() -> AsyncContainer:
         },
     )
 
-    logger.info(f"Выполняется загрузка модели {settings.milvus.model_name.split('/')[-1]} ...")
-    from sentence_transformers import SentenceTransformer
-
-    model = SentenceTransformer(settings.milvus.model_name)
-    model.encode(["warmup"], convert_to_numpy=True)
-
-    logger.info("Модель успешно загружена")
-    ce_model = CrossEncoder(settings.reranker.model_name, device=settings.reranker.device)
-    logger.info("Кросс-энкодер загружен")
     return container
 
 
@@ -128,7 +111,7 @@ def run_coroutine(coro: tp.Coroutine) -> Future:
 @worker_process_init.connect
 def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
     init_container_and_model()
-    global drain_task, sweep_task
+    global successful_warmup
 
     # стартуем event loop в отдельном потоке
     def _start_loop() -> None:
@@ -137,13 +120,26 @@ def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
 
     threading.Thread(target=_start_loop, daemon=True).start()
 
+    async def _eager_init() -> bool:
+        orch = await container.get(IHybridSearchOrchestrator)
+        try:
+            ok = await orch.warmup()
+            return ok
+        except Exception as e:
+            logger and logger.warning(f"⚠️ Warmup error: {e!r}")
+            return False
+    try:
+     successful_warmup = run_coroutine(_eager_init())
+     logger and logger.info(f"✅ Завершили прогрев, result={successful_warmup}")
+    except Exception as e:
+        logger and logger.warning(f"⚠️ Warmup failed with exception: {e!r}")
+        successful_warmup = False
+
 
 @task_prerun.connect
 def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any]) -> None:
     """Процесс перед выполнением задачи"""
     task._container = container
-    task._model = model
-    task._ce_model = ce_model
     task.task_id = task_id
 
 
@@ -151,15 +147,6 @@ def on_task_prerun(task: tp.Callable, task_id: str, **kwargs: dict[str, tp.Any])
 def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
     """Корректный shutdown воркера Celery."""
 
-    async def _stop_background_tasks() -> None:
-        """Отмена и завершение drain_task и sweep_task."""
-        tasks = [t for t in (drain_task, sweep_task) if t]
-        for t in tasks:
-            t.cancel()
-
-        for t in tasks:
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await t
 
     async def _shutdown_container_and_clients() -> None:
         if container:
@@ -177,7 +164,6 @@ def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
                 logger and logger.warning(f"Ошибка при закрытии контейнера: {e!r}")
 
     async def _run_shutdown() -> None:
-        await _stop_background_tasks()
         await _shutdown_container_and_clients()
         # Останавливаем глобальный loop в отдельном потоке
         loop.call_soon_threadsafe(loop.stop)
@@ -190,17 +176,16 @@ def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
 @worker.task(name='main_worker_health_check')
 def health_check():
     """Healthcheck задача, которая проверяет готовность воркера"""
-    global container, model, ce_model
+    global container
     
     checks = {
         "container_ready": container is not None,
-        "model_loaded": model is not None,
-        "ce_model_loaded": ce_model is not None,
-        "event_loop_running": loop.is_running() if loop else False
+        "event_loop_running": loop.is_running() if loop else False,
+        "successful_warmup": successful_warmup,
     }
     
     all_healthy = all(checks.values())
-    
+
     return {
         "status": "healthy" if all_healthy else "unhealthy",
         "checks": checks

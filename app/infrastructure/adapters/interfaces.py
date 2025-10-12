@@ -133,5 +133,18 @@ class ICrossEncoderAdapter(abc.ABC):
     """Адаптер кросс-энкодера"""
 
     @abc.abstractmethod
-    def rank(self, model: CrossEncoder, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
+    def rank(self, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
         """Реранжирование"""
+
+    @abc.abstractmethod
+    def rank_fast(self, pairs: list[tuple[str, str]], device: str = "cuda", batch_size: int = 128,  max_length: int = 192, dtype: str = "fp16") -> list[float]:
+        """Быстрое ранкирование"""
+
+    @abc.abstractmethod
+    def ce_postprocess(self, logits: list[float]) -> list[float]:
+        """
+        Преобразует логиты CE в интерпретируемые очки.
+        Режим управляется self.settings.ce_score_mode:
+        - "sigmoid" (по умолчанию): независимая вероятность для каждого (query, doc)
+        - "softmax": распределение по кандидатовому списку (с температурой)
+        """

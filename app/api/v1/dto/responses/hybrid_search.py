@@ -1,5 +1,15 @@
 from pydantic import BaseModel
+import typing as tp
 
+
+class SearchMetrics(BaseModel):
+    """Метрики выполнения поиска (все значения в секундах)"""
+    embedding_time: tp.Optional[float] = None
+    vector_search_time: tp.Optional[float] = None
+    opensearch_time: tp.Optional[float] = None
+    bm25_time: tp.Optional[float] = None
+    cross_encoder_time: tp.Optional[float] = None
+    total_time: tp.Optional[float] = None
 
 class SearchResult(BaseModel):
     """Информация о результате поиска"""
@@ -12,10 +22,11 @@ class SearchResult(BaseModel):
     score_lex: float = 0.0
     score_ce: float = 0.0
     score_final: float = 0.0
-    source: str = ""
+    sources: list = []
 
 
 class HybridSearchResponse(BaseModel):
     """Результаты гибридного поиска"""
 
     results: list[SearchResult]
+    metrics: tp.Optional[SearchMetrics] | None = None

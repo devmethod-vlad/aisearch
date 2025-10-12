@@ -1,5 +1,6 @@
 import pickle
 import typing as tp
+import time
 
 import numpy as np
 import pandas as pd
@@ -8,6 +9,7 @@ from rank_bm25 import BM25Okapi
 from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import IBM25Adapter
 from app.infrastructure.utils.nlp import normalize_query
+from app.infrastructure.utils.metrics import metrics_print
 from app.settings.config import Settings
 
 
@@ -15,13 +17,15 @@ class BM25Adapter(IBM25Adapter):
     """Адаптер bm25 на rank_bm25"""
 
     def __init__(self, settings: Settings, logger: AISearchLogger):
+        bm25_init_start = time.perf_counter()
         self.index_path = settings.bm25.index_path
         self.schema_fields = settings.bm25.schema_fields
         self._ix: BM25Okapi | None = None
         self._data: pd.DataFrame | None = None
         self.ensure_index() if settings.switches.use_bm25 else None
         self.logger = logger
-        print("ИНИЦИАЛИЗАЦИЯ BM25")
+        metrics_print("🕒 Инициализация BM25", bm25_init_start)
+
 
     @staticmethod
     def build_index(

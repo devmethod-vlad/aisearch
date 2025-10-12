@@ -64,6 +64,7 @@
     MILVUS_WEB_UI_PORT=9091
     MILVUS_CONNECTION_TIMEOUT=120
     MILVUS_QUERY_TIMEOUT=30
+    MILVUS_METRIC_TYPE=IP
     MILVUS_PRELOADED_COLLECTION_NAMES=med_rag,kb_default
     MILVUS_RECREATE_COLLECTION=false
     MILVUS_VECTOR_FIELD=embedding
@@ -98,6 +99,12 @@
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
+    HYBRID_MERGE_TOP_K=20
+    HYBRID_MERGE_FIELDS=question,analysis,answer
+    HYBRID_DENSE_ABS_MIN=0.25
+    HYBRID_DENSE_REL_MIN=0.6
+    HYBRID_LEX_REL_MIN=0.5
+    HYBRID_PRECUT_MIN_KEEP=3
 
     # === SlowAPI ===
     
@@ -153,6 +160,11 @@
 
     # === CrossEncoder (reranker) ===
     RERANKER_DEVICE=cuda   # или cuda
+    RERANKER_BATCH_SIZE=128
+    RERANKER_MAX_LENGTH=192
+    RERANKER_DTYPE=fp16
+    RERANKER_SCORE_MOD=sigmoid
+    RERANKER_SOFTMAX_TEMP=0.7
 
     # === vLLM (локальный OpenAI-совместимый сервер) ===
     VLLM_BASE_URL=http://aisearch-vllm:8000/v1
@@ -172,6 +184,9 @@
     WARMUP_ENABLED=true
     WARMUP_CE_PAIRS="Как оформить доступ в систему?||Как оформить доступ врача в систему?;Запись к врачу||Как записаться к врачу"
     WARMUP_EMBED_TEXTS="Пример вопроса один;Пример вопроса два"
+
+    TIMEIT_LOG_METRICS_ENABLED=true  # включить логгирование времени
+    TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
 
 ## Сборка образов
 Для ускорения процесса работы разделим сборку на три образа:

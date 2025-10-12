@@ -1,5 +1,5 @@
-import asyncio
 import typing as tp
+import time
 
 import numpy as np
 import pandas as pd
@@ -17,6 +17,7 @@ from app.common.exceptions.exceptions import (
 from app.common.logger import AISearchLogger
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.utils.nlp import l2_normalize
+from app.infrastructure.utils.metrics import metrics_print
 from app.settings.config import MilvusSettings
 
 
@@ -24,18 +25,19 @@ class MilvusDatabase(IVectorDatabase):
     """Класс для работы с Milvus DB с использованием AsyncMilvusClient."""
 
     def __init__(self, settings: MilvusSettings, logger: AISearchLogger):
+        milvus_init_start = time.perf_counter()
         self.config = settings
         self.logger = logger
         self.client = AsyncMilvusClient(
             uri=f"http{'s' if self.config.use_ssl else ''}://{self.config.host}:{self.config.port}",
             timeout=self.config.connection_timeout,
         )
-
         self.__collections_loaded = set()
 
         # Инициализация выполняется асинхронно
-        asyncio.create_task(self.initialize_model_metadata_collection())
-        asyncio.create_task(self.preload_collections())
+        self.initialize_model_metadata_collection()
+        self.preload_collections()
+        metrics_print("🕒 Инициализация Milvus", milvus_init_start)
 
 
     @staticmethod
@@ -80,7 +82,7 @@ class MilvusDatabase(IVectorDatabase):
         index_params.add_index(
             field_name=self.config.vector_field,
             index_type="HNSW",
-            metric_type="IP",
+            metric_type=self.config.metric_type,
             params={"M": 16, "efConstruction": 128},
         )
 
@@ -165,7 +167,7 @@ class MilvusDatabase(IVectorDatabase):
             collection_name=collection_name,
             data=[query_vector],
             anns_field=self.config.vector_field,
-            params={"metric_type": "IP", "params": {"ef": 64}},
+            params={"metric_type": self.config.metric_type, "params": {"ef": 64}},
             limit=top_k,
             output_fields=self.config.output_fields,
             timeout=self.config.query_timeout,
@@ -282,7 +284,7 @@ class MilvusDatabase(IVectorDatabase):
                 timeout=self.config.query_timeout,
             )
 
-            self.logger.info("Коллекция 'model_metadata' успешно создана")
+            self.logger.info("✅ Коллекция 'model_metadata' успешно создана")
 
         # Загружаем коллекцию
         await self.client.load_collection("model_metadata", timeout=self.config.query_timeout)
@@ -292,14 +294,14 @@ class MilvusDatabase(IVectorDatabase):
         """Предзагрузка коллекций в память"""
         for collection_name in self.config.preloaded_collection_names:
             try:
-                self.logger.info(f"Загрузка коллекции {collection_name} ...")
+                self.logger.info(f"⏳ Загрузка коллекции {collection_name} ...")
                 await self.client.load_collection(
                     collection_name, timeout=self.config.query_timeout
                 )
                 self.__collections_loaded.add(collection_name)
-                self.logger.info(f"Коллекция {collection_name} успешно загружена")
+                self.logger.info(f"✅ Коллекция {collection_name} успешно загружена")
             except Exception as e:
-                self.logger.warning(f"Не удалось загрузить коллекцию {collection_name}: {e}")
+                self.logger.warning(f"⚠️ Не удалось загрузить коллекцию {collection_name}: {e}")
 
     async def get_model_metadata(self, limit: int = 10) -> list[dict[str, tp.Any]]:
         """Получение результатов model_metadata"""
@@ -313,7 +315,7 @@ class MilvusDatabase(IVectorDatabase):
             )
             return results
         except Exception as e:
-            self.logger.error(f"Ошибка при получении метаданных моделей: {e}")
+            self.logger.error(f"⚠️ Ошибка при получении метаданных моделей: {e}")
             return []
 
     async def index_documents(
@@ -357,7 +359,7 @@ class MilvusDatabase(IVectorDatabase):
         """
 
         if recreate:
-            self.logger.info(f"Пересоздание коллекции {collection_name} (recreate=True) ...")
+            self.logger.info(f"⏳ Пересоздание коллекции {collection_name} (recreate=True) ...")
             if await self.collection_ready(collection_name):
                 await self.delete_collection(collection_name=collection_name)
             if documents is None:

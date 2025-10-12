@@ -43,6 +43,7 @@ class MilvusSettings(EnvBaseSettings):
     recreate_collection: bool = False
     vector_field: str = "embedding"
     id_field: str = "ext_id"
+    metric_type: str = "IP"
     output_fields: str | list[str] = (
         "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
     )
@@ -110,9 +111,23 @@ class HybridSearchSettings(EnvBaseSettings):
     dense_threshold: float = 0.0
     lex_threshold: float = 0.0
     ce_threshold: float = 0.0
+    dense_abs_min: float = 0.25
+    dense_rel_min: float = 0.6
+    lex_rel_min: float = 0.5
+    precut_min_keep: int = 3
     cache_ttl: int = 3600
     version: str = "v1"
     collection_name: str = "kb_default"
+    merge_top_k: int = 20
+    merge_fields: str | list[str] # 👈 Новое поле
+
+    @model_validator(mode="after")
+    def assemble_hybrid_settings(self) -> tp.Self:
+        """Парсинг merge_fields из строки в список"""
+        if isinstance(self.merge_fields, str):
+            self.merge_fields = [f.strip() for f in self.merge_fields.split(",") if f.strip()]
+        return self
+
     model_config = SettingsConfigDict(env_prefix="hybrid_")
 
 
@@ -145,7 +160,7 @@ class LLMGlobalSemaphoreSettings(EnvBaseSettings):
     key: str = "llm:{global}:sem"
     limit: int = 2
     ttl_ms: int = 120000
-    wait_timeout_ms: int = 30000
+    wait_timeout_ms: int = 1
     heartbeat_ms: int = 30000
 
     model_config = SettingsConfigDict(env_prefix="llm_global_sem_")
@@ -195,6 +210,11 @@ class RerankerSettings(EnvBaseSettings):
 
     model_name: str
     device: str = "cpu"
+    batch_size: int = 128
+    max_length: int = 192
+    score_mode: str = "sigmoid"
+    softmax_temp: float = 0.7
+    dtype: str = "fp16"
     model_config = SettingsConfigDict(env_prefix="reranker_")
 
 
@@ -217,6 +237,15 @@ class CelerySettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="celery_")
 
 
+class SearchMetricsEnabled(EnvBaseSettings):
+    """Вывод временных метрик поиска"""
+    log_metrics_enabled: bool = True
+    response_metrics_enabled: bool = True
+
+    model_config = SettingsConfigDict(env_prefix="timeit_")
+
+
+
 class Settings(EnvBaseSettings):
     """Настройки проекта."""
 
@@ -234,6 +263,7 @@ class Settings(EnvBaseSettings):
     warmup: WarmupSettings = WarmupSettings()
     switches: SearchSwitches = SearchSwitches()
     slowapi: SlowAPISettings = SlowAPISettings()
+    search_metrics: SearchMetricsEnabled = SearchMetricsEnabled()
 
     @model_validator(mode="after")
     def _fill_vllm_model(self) -> Self:

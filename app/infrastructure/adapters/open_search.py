@@ -1,4 +1,5 @@
 import typing as tp
+import time
 
 import pandas as pd
 from opensearchpy import (
@@ -8,6 +9,7 @@ from opensearchpy import (
 
 from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import IOpenSearchAdapter
+from app.infrastructure.utils.metrics import metrics_print
 from app.settings.config import Settings
 
 
@@ -15,6 +17,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
     """Адаптер для opensearch"""
 
     def __init__(self, settings: Settings, logger: AISearchLogger):
+        os_init_start = time.perf_counter()
         self.config = settings.opensearch
         self.client = OpenSearch(
             hosts=[{"host": self.config.host, "port": self.config.port}],
@@ -24,7 +27,8 @@ class OpenSearchAdapter(IOpenSearchAdapter):
             verify_certs=self.config.verify_certs,
         )
         self.logger = logger
-        print("ИНИЦИАЛИЗАЦИЯ OPENSEARCH")
+        metrics_print("🕒 Инициализация OPENSEARCH", os_init_start)
+
 
     def build_index(self, data: pd.DataFrame) -> None:
         """Построение индекса"""

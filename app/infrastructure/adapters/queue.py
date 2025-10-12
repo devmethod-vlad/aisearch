@@ -7,6 +7,7 @@ import typing as tp
 from redis import WatchError
 from redis.asyncio import Redis
 
+from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import ILLMQueue
 from app.settings.config import Settings
 
@@ -17,13 +18,14 @@ class LLMQueue(ILLMQueue):
     - HASH: мета по тикету (state, payload, task_id, error ...)
     """
 
-    def __init__(self, redis: Redis, settings: Settings):
+    def __init__(self, redis: Redis, settings: Settings, logger: AISearchLogger):
         self.redis = redis
         self.qkey = settings.llm_queue.queue_list_key
         self.tprefix = settings.llm_queue.ticket_hash_prefix
         self.max_size = settings.llm_queue.max_size
         self.ticket_ttl = settings.llm_queue.ticket_ttl
         self.pkey = settings.llm_queue.processing_list_key or f"{self.qkey}:processing"
+        self.logger = logger
 
     async def requeue(self, ticket_id: str, *, reason: str | None = None) -> None:
         """Снять тикет с processing и поставить его в конец основной очереди."""
@@ -189,6 +191,7 @@ class LLMQueue(ILLMQueue):
             if not data:
                 # Хэш пропал/протух — очистим processing
                 await self.redis.lrem(self.pkey, 1, ticket_id)
+                self.logger.warning(f"🚨 В ходе проверке не найден хэш {hkey}. Удаляем {self.pkey} из processig")
                 continue
 
             # Вспомогательный декодер
@@ -204,6 +207,7 @@ class LLMQueue(ILLMQueue):
 
             # Реальные «подвисшие» состояния — queued/running без движения
             if state in {"queued", "failed"} and now - updated_at >= stale_sec:
+                self.logger.warning(f"🚨 Найден повисший тикет {ticket_id} в статусе {state}. Переставляем из processing в queue")
                 await self.requeue(ticket_id, reason="sweep: stale in processing")
                 requeued += 1
 
