@@ -1,3 +1,4 @@
+import json
 import typing as tp
 from pathlib import Path
 from typing import Self
@@ -26,6 +27,7 @@ class AppSettings(EnvBaseSettings):
     use_cache: bool = True
     logs_host_path: str
     logs_contr_path: str
+    normalize_query: bool
 
     model_config = SettingsConfigDict(env_prefix="app_")
 
@@ -38,10 +40,12 @@ class MilvusSettings(EnvBaseSettings):
     use_ssl: bool = False
     connection_timeout: int
     query_timeout: int
-    preloaded_collection_names: str | list[str]
+    collection_name: str
     model_name: str
     recreate_collection: bool = False
     vector_field: str = "embedding"
+    schema_path: str = "app/config/conf.json"
+    data_searchfields: str = "question"
     id_field: str = "ext_id"
     metric_type: str = "IP"
     output_fields: str | list[str] = (
@@ -51,11 +55,11 @@ class MilvusSettings(EnvBaseSettings):
     @model_validator(mode="after")
     def assemble_milvus_settings(self) -> tp.Self:
         """Досборка настроек MilvusDB"""
-        if isinstance(self.preloaded_collection_names, str):
-            self.preloaded_collection_names = self.preloaded_collection_names.split(",")
         if isinstance(self.output_fields, str):
             self.output_fields = self.output_fields.split(",")
         return self
+
+
 
     model_config = SettingsConfigDict(env_prefix="milvus_")
 
@@ -183,6 +187,7 @@ class OpenSearchSettings(EnvBaseSettings):
     fuzziness: int = 0
     use_rescore: bool = False
     index_answer: bool = True
+    schema_path: str = "app/config/os_index.json"
     bulk_chunk_size: int = 1000
     recreate_index: bool = True
     model_config = SettingsConfigDict(env_prefix="os_")
@@ -214,8 +219,16 @@ class RerankerSettings(EnvBaseSettings):
     max_length: int = 192
     score_mode: str = "sigmoid"
     softmax_temp: float = 0.7
+    pairs_fields: str | list[str]
     dtype: str = "fp16"
     model_config = SettingsConfigDict(env_prefix="reranker_")
+
+    @model_validator(mode="after")
+    def assemble_pairs_settings(self) -> tp.Self:
+        """Парсинг pairs_fields из строки в список"""
+        if isinstance(self.pairs_fields, str):
+            self.pairs_fields = [f.strip() for f in self.pairs_fields.split(",") if f.strip()]
+        return self
 
 
 class WarmupSettings(BaseSettings):
@@ -231,7 +244,9 @@ class CelerySettings(EnvBaseSettings):
     """Настройки Celery"""
 
     logs_host_path: str
+    logs_queue_host_path: str
     logs_contr_path: str
+    logs_queue_contr_path: str
     workers_num: int
 
     model_config = SettingsConfigDict(env_prefix="celery_")

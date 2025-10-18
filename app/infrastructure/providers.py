@@ -1,33 +1,10 @@
 import redis.asyncio as redis
 from dishka import Provider, Scope, from_context, provide
-from fastapi import Request
-from fastapi.security import HTTPAuthorizationCredentials
 
-from app.common.auth import AccessBearer
 from app.common.logger import AISearchLogger, LoggerType
-from app.infrastructure.storages.milvus import MilvusDatabase
-from app.settings.config import MilvusSettings, RedisSettings
 
+from app.settings.config import RedisSettings
 
-class AuthProvider(Provider):
-    """Провайдер для аутентификации."""
-
-    @provide(scope=Scope.REQUEST)
-    async def get_auth(self, request: Request) -> HTTPAuthorizationCredentials | None:
-        """Получение аутентификации."""
-        bearer = AccessBearer()
-        return await bearer(request)
-
-
-class MilvusProvider(Provider):
-    """Провайдер для MilvusDB."""
-
-    milvus_settings = from_context(provides=MilvusSettings, scope=Scope.APP)
-
-    @provide(scope=Scope.APP)
-    def milvus_db(self, milvus_settings: MilvusSettings, logger: AISearchLogger) -> MilvusDatabase:
-        """Получение MilvusDatabase."""
-        return MilvusDatabase(settings=milvus_settings, logger=logger)
 
 
 class LoggerProvider(Provider):

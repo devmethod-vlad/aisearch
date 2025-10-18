@@ -1,4 +1,4 @@
-import typing as tp
+import json
 import time
 
 import pandas as pd
@@ -10,6 +10,7 @@ from opensearchpy import (
 from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import IOpenSearchAdapter
 from app.infrastructure.utils.metrics import metrics_print
+from app.domain.schemas.open_search import OSIndexSchema
 from app.settings.config import Settings
 
 
@@ -27,7 +28,9 @@ class OpenSearchAdapter(IOpenSearchAdapter):
             verify_certs=self.config.verify_certs,
         )
         self.logger = logger
+        self.os_schema = self._load_os_schema_from_json(self.config.schema_path)
         metrics_print("🕒 Инициализация OPENSEARCH", os_init_start)
+
 
 
     def build_index(self, data: pd.DataFrame) -> None:
@@ -41,7 +44,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
 
     def search(self, body: dict, size: int) -> list[dict]:
         """Поиск при помощи opensearch"""
-        resp = self.client.search(index=self.config.index_name, body=body, size=size)
+        resp = self.client.search(index=self.config.index_name, body=body, size=size) # можно заменить на self.os_schema.index_name - но только если recreate будет стоять всегда, что не оч хорошо
         return resp["hits"]["hits"]
 
     def _os_optimize_for_bulk(self, on: bool) -> None:
@@ -58,20 +61,46 @@ class OpenSearchAdapter(IOpenSearchAdapter):
             self.client.indices.refresh(index=self.config.index_name)
 
     def _os_bulk_index(self, data: pd.DataFrame, chunk_size: int = 1000) -> None:
-        rows = []
-        for _, r in data.iterrows():
-            row_dict = {col: str(r[col]) for col in data.columns}
-            rows.append(row_dict)
+        chunk_size = chunk_size or self.os_schema.bulk_chunk_size
+        idx_name = self.os_schema.index_name
+        id_field = self.os_schema.id_field
 
-        scalar_keys = list(rows[0].keys()) if rows else []
+        # Быстрый доступ к типам из мэппинга
+        props = (self.os_schema.mappings.get("properties") or {})
+        type_of: dict[str, str] = {k: (v.get("type") or "") for k, v in props.items()}
 
-        def gen_actions() -> tp.Generator[dict, None, None]:
-            for r in rows:
-                doc = {key: r[key] for key in scalar_keys}
+        def coerce(field: str, value):
+            t = type_of.get(field, "")
+            if value is None:
+                return None
+            try:
+                if t in ("keyword", "text"):
+                    return str(value)
+                if t in ("integer", "short", "byte", "long"):
+                    return int(value)
+                if t in ("float", "half_float", "scaled_float", "double"):
+                    return float(value)
+                if t == "boolean":
+
+                    return bool(value)
+
+                return value
+            except Exception:
+
+                return None
+
+        cols = list(data.columns)
+
+        def gen_actions():
+            for _, row in data.iterrows():
+
+                doc = {c: coerce(c, row[c]) for c in cols if c in type_of}
+
+                _id = doc.get(id_field)
                 yield {
                     "_op_type": "index",
-                    "_index": self.config.index_name,
-                    "_id": r["row_idx"],
+                    "_index": idx_name,
+                    **({"_id": _id} if _id is not None else {}),
                     "_source": doc,
                 }
 
@@ -81,53 +110,27 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         """Создание индекса с русским анализатором.
         OS_INDEX_ANSWER=true|false — индексировать ли поле answer как text (иначе останется в _source).
         """
-        if recreate and self.client.indices.exists(
-            index=self.config.index_name, expand_wildcards="all"
-        ):
-            self.client.indices.delete(index=self.config.index_name, ignore=[400, 404])
+        idx_name = self.os_schema.index_name
 
-        if not self.client.indices.exists(index=self.config.index_name):
-            # Русский анализатор + базовый мэппинг
-            answer_mapping = (
-                {"type": "text", "analyzer": "ru_mixed"}
-                if self.config.index_answer
-                else {"type": "text", "index": False}  # type: ignore
-            )
+        if recreate and self.client.indices.exists(index=idx_name, expand_wildcards="all"):
+            self.client.indices.delete(index=idx_name, ignore=[400, 404])
 
+        if not self.client.indices.exists(index=idx_name):
             body = {
-                "settings": {
-                    "index": {"number_of_shards": 1, "number_of_replicas": 0},
-                    "analysis": {
-                        "filter": {
-                            "ru_stop": {"type": "stop", "stopwords": "_russian_"},
-                            "ru_stemmer": {"type": "stemmer", "language": "russian"},
-                        },
-                        "analyzer": {
-                            "ru_mixed": {
-                                "type": "custom",
-                                "tokenizer": "standard",
-                                "char_filter": ["html_strip"],
-                                "filter": ["lowercase", "ru_stop", "ru_stemmer"],
-                            }
-                        },
-                    },
-                },
-                "mappings": {
-                    "properties": {
-                        "row_idx": {"type": "integer"},
-                        "source": {"type": "keyword"},
-                        "ext_id": {"type": "keyword"},
-                        "page_id": {"type": "keyword"},
-                        "role": {"type": "keyword"},
-                        "component": {"type": "keyword"},
-                        "question": {
-                            "type": "text",
-                            "analyzer": "ru_mixed",
-                            "fields": {"kw": {"type": "keyword", "ignore_above": 1024}},
-                        },
-                        "analysis": {"type": "text", "analyzer": "ru_mixed"},
-                        "answer": answer_mapping,
-                    }
-                },
+                "settings": self.os_schema.settings,
+                "mappings": self.os_schema.mappings,
             }
-            self.client.indices.create(index=self.config.index_name, body=body)
+            self.client.indices.create(index=idx_name, body=body)
+
+    def _load_os_schema_from_json(self, path: str) -> OSIndexSchema:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        return OSIndexSchema(
+            index_name=data.get("index_name", self.config.index_name),
+            id_field=data.get("id_field", "row_idx"),
+            settings=data.get("settings", {}),
+            mappings=data.get("mappings", {}),
+            bulk_chunk_size=(data.get("bulk") or {}).get("chunk_size", self.config.bulk_chunk_size),
+        )
+

@@ -2,31 +2,34 @@ services:
   aisearch-app:
     build:
       context: .
-      dockerfile: Dockerfile_main
+      dockerfile: Dockerfile_api
       args:
-        - IMAGE_NAME_BASE=${IMAGE_NAME_BASE}
-        - REGISTRY=${REGISTRY}
+        https_proxy: ${HTTPS_PROXY}
+        http_proxy: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        HTTP_PROXY: ${HTTP_PROXY}
     healthcheck:
       disable: true
     command: >
       sh -c "
         exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
       "
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
 
   aisearch-celery-worker:
     build:
       context: .
-      dockerfile: Dockerfile_main
+      dockerfile: Dockerfile_search_main
       args:
-        - IMAGE_NAME_BASE=${IMAGE_NAME_BASE}
-        - REGISTRY=${REGISTRY}
+        https_proxy: ${HTTPS_PROXY}
+        http_proxy: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        HTTP_PROXY: ${HTTP_PROXY}
+        IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+        IMAGE_NAME: ${IMAGE_NAME}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+        CUDA_IMAGE: ${CUDA_IMAGE}
+        CUDA_WHEEL: ${CUDA_WHEEL}
     deploy:
       resources:
         reservations:
@@ -57,31 +60,21 @@ services:
     container_name: aisearch-queue-worker
     build:
       context: .
-      dockerfile: Dockerfile_main
+      dockerfile: Dockerfile_queue
       args:
-        - IMAGE_NAME_BASE=${IMAGE_NAME_BASE}
-        - REGISTRY=${REGISTRY}
+        https_proxy: ${HTTPS_PROXY}
+        http_proxy: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        HTTP_PROXY: ${HTTP_PROXY}
     command: >
-      sh -c "python3 -m app.infrastructure.worker.queue_worker"
+        sh -c "python3 -m app.infrastructure.queue_worker.worker --loglevel=info -Q gpu-search"
     volumes:
       - ./:/backend
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
-      - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
-      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+      - ${CELERY_LOGS_QUEUE_HOST_PATH}/:${CELERY_LOGS_QUEUE_CONTR_PATH}/
     env_file:
       - .env
     environment:
-      - REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
       - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
-

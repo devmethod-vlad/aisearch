@@ -16,15 +16,15 @@ from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
     IBM25Adapter,
     ICrossEncoderAdapter,
-    ILLMQueue,
     IOpenSearchAdapter,
     IRedisSemaphore,
     IVLLMAdapter,
 )
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.adapters.open_search import OpenSearchAdapter
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.utils.nlp import hash_query, normalize_query
-from app.infrastructure.worker.worker import run_coroutine
+from app.infrastructure.search_worker.worker import run_coroutine
 from app.services.interfaces import IHybridSearchOrchestrator
 from app.settings.config import (
     HybridSearchSettings,

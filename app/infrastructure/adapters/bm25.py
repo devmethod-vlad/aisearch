@@ -4,6 +4,7 @@ import time
 
 import numpy as np
 import pandas as pd
+import pymorphy3
 from rank_bm25 import BM25Okapi
 
 from app.common.logger import AISearchLogger
@@ -34,7 +35,8 @@ class BM25Adapter(IBM25Adapter):
         """Построение индекса"""
         logger.info("Построение индекса BM25 ...")
 
-        tokenized_corpus = [normalize_query(t) for t in texts]
+        morph = pymorphy3.MorphAnalyzer()
+        tokenized_corpus = [normalize_query(t, morph) for t in texts]
 
         with open(f"{index_path}/bm25.pkl", "wb") as f:
             pickle.dump(

@@ -2,18 +2,12 @@ services:
   aisearch-app:
     build:
       context: .
-      dockerfile: Dockerfile_main
+      dockerfile: Dockerfile_api
       args:
         https_proxy: ${HTTPS_PROXY}
         http_proxy: ${HTTP_PROXY}
         HTTPS_PROXY: ${HTTPS_PROXY}
         HTTP_PROXY: ${HTTP_PROXY}
-        IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
-        IMAGE_NAME: ${IMAGE_NAME}
-        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
-        REGISTRY: ${REGISTRY}
-        CUDA_IMAGE: ${CUDA_IMAGE}
-        CUDA_WHEEL: ${CUDA_WHEEL}
     healthcheck:
       disable: true
     networks:
@@ -32,6 +26,14 @@ services:
               capabilities: [ gpu ]
 
   aisearch-queue-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile_queue
+      args:
+        https_proxy: ${HTTPS_PROXY}
+        http_proxy: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        HTTP_PROXY: ${HTTP_PROXY}
     networks:
       - default
       - service-network
@@ -39,7 +41,7 @@ services:
   aisearch-celery-worker:
     build:
       context: .
-      dockerfile: Dockerfile_main
+      dockerfile: Dockerfile_search_main
       args:
         https_proxy: ${HTTPS_PROXY}
         http_proxy: ${HTTP_PROXY}

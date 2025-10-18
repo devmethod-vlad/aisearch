@@ -13,9 +13,9 @@ ENV http_proxy=${http_proxy} https_proxy=${https_proxy}\
 
 WORKDIR /backend
 
-COPY pyproject.toml ./
+COPY buildeps/search/pyproject.toml ./buildeps/search/pyproject.toml
 
-RUN uv pip compile pyproject.toml -o requirements.lock \
+RUN uv pip compile buildeps/search/pyproject.toml -o requirements.lock \
  && uv pip sync --system requirements.lock
 
 ENV  http_proxy=''  https_proxy='' \

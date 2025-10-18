@@ -8,9 +8,8 @@ from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.domain.exceptions import TooManyRequestsException
-from app.infrastructure.adapters.interfaces import (
-    ILLMQueue,
-)
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
+
 from app.services.interfaces import IHybridSearchService
 from app.settings.config import (
     Settings,

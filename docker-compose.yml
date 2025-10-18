@@ -4,22 +4,16 @@ services:
     env_file:
       - .env
     environment:
-      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
-      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
-      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
-      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL}
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL}
     volumes:
       - ./:/backend
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
-      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
     ports:
       - ${APP_PORT}:${APP_PORT}
     healthcheck:
       test: curl -f ${APP_HOST}:${APP_PORT}/healthcheck || exit 1
-      interval: 30s
+      interval: 10s
       timeout: 5s
       retries: 3
 
@@ -37,34 +31,29 @@ services:
 
   aisearch-queue-worker:
     container_name: aisearch-queue-worker
-    build:
-      context: .
-      dockerfile: Dockerfile_main
-      args:
-        - IMAGE_NAME_BASE=${IMAGE_NAME_BASE}
-        - REGISTRY=${REGISTRY}
     command: >
-      sh -c "python3 -m app.infrastructure.worker.queue_worker --loglevel=info -Q gpu-search"
+      sh -c "python3 -m app.infrastructure.queue_worker.worker --loglevel=info -Q gpu-search"
     volumes:
       - ./:/backend
-      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
-      - ${CELERY_LOGS_HOST_PATH}/:${CELERY_LOGS_CONTR_PATH}/
-      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+      - ${CELERY_LOGS_QUEUE_HOST_PATH}/:${CELERY_LOGS_QUEUE_CONTR_PATH}/
     env_file:
       - .env
     environment:
-      - REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
-      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
-      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
-      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
-      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL}
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL}
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+        restart: true
+      aisearch-celery-worker:
+        condition: service_healthy
+        restart: true
 
   aisearch-celery-worker:
-    container_name: aisearch-celery-worker
+    container_name: aisearch-celery-search-worker
     command: >
       sh -c "
-        celery -A app.infrastructure.worker.worker:worker worker --loglevel=info -Q gpu-search --concurrency ${CELERY_WORKERS_NUM}
+        python3 pre_launch.py --load --logtype celery && celery -A app.infrastructure.search_worker.worker:worker worker --loglevel=info -Q gpu-search --concurrency ${CELERY_WORKERS_NUM}
       "
     volumes:
       - ./:/backend
@@ -75,14 +64,19 @@ services:
     env_file:
       - .env
     environment:
-      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
-      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL}
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
 
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+        restart: true
+
     healthcheck:
-      test: [ "CMD", "python3", "-m", "app.infrastructure.worker.healthcheck" ]
-      interval: 30s
+      test: [ "CMD", "python3", "-m", "app.infrastructure.search_worker.healthcheck" ]
+      interval: 10s
       timeout: 30s
       retries: 5
       start_period: 60s

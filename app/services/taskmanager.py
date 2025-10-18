@@ -3,7 +3,7 @@ from celery.result import AsyncResult
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
-from app.infrastructure.worker.worker import worker
+
 from app.services.interfaces import ITaskManagerService
 from app.settings.config import RedisSettings
 
@@ -23,7 +23,7 @@ class TaskManagerService(ITaskManagerService):
 
     async def get_task_info(self, task_id: str) -> TaskResponse:
         """Получение информации о задаче"""
-        task_result = AsyncResult(str(task_id), app=worker)
+        task_result = AsyncResult(str(task_id))
         return TaskResponse(
             task_id=task_id,
             url=f"/taskmanager/{task_id}",

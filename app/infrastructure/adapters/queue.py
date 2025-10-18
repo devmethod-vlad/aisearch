@@ -7,8 +7,8 @@ import typing as tp
 from redis import WatchError
 from redis.asyncio import Redis
 
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.common.logger import AISearchLogger
-from app.infrastructure.adapters.interfaces import ILLMQueue
 from app.settings.config import Settings
 
 

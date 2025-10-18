@@ -1,9 +1,7 @@
 import abc
 import typing as tp
 
-import pandas as pd
 from sentence_transformers import SentenceTransformer
-
 
 class IVectorDatabase(abc.ABC):
     """Интерфейс для работы с векторными базами данных."""
@@ -14,59 +12,50 @@ class IVectorDatabase(abc.ABC):
         """Получить имя модели"""
 
     @abc.abstractmethod
-    async def create_collection(self, collection_name: str, dim: int) -> None:
+    async def create_collection(
+        self,
+        collection_name: str,
+    ) -> None:
         """Создает коллекцию для хранения векторов."""
-        pass
 
     @abc.abstractmethod
     async def insert_vectors(
-        self, collection_name: str, vectors: list[list[float]], metadata: list[dict[str, tp.Any]]
+        self,
+        collection_name: str,
+        vectors: list[list[float]],
+        metadata: list[dict[str, tp.Any]] | None = None,
+        batch_size: int = 512,
     ) -> None:
         """Вставляет векторы и связанные метаданные в коллекцию."""
-        pass
 
     @abc.abstractmethod
     async def search(
-        self, collection_name: str, query_vector: list[float], top_k: int
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        top_k: int,
     ) -> list[dict[str, tp.Any]]:
         """Выполняет поиск по косинусной схожести."""
-        pass
 
     @abc.abstractmethod
     async def collection_ready(self, collection_name: str) -> bool:
-        """Проверяет, существует ли коллекция."""
-        pass
+        """Проверяет, существует ли коллекция и готова ли к работе."""
 
     @abc.abstractmethod
     async def delete_collection(self, collection_name: str) -> None:
         """Удаляет коллекцию."""
-        pass
 
     @abc.abstractmethod
-    async def get_model_by_collection(self, collection_name: str) -> str:
-        """Получение текущей модели из метаданных."""
-        pass
-
-    @abc.abstractmethod
-    async def update_model_metadata(self, collection_name: str, model_name: str) -> None:
-        """Сохранение информации о модели в метаданные."""
-        pass
-
-    @abc.abstractmethod
-    def initialize_model_metadata_collection(self) -> None:
-        """Инициализация коллекции для метаданных модели."""
-
-    @abc.abstractmethod
-    def preload_collections(self) -> None:
-        """Предзагрузка коллекций в память"""
-
-    @abc.abstractmethod
-    async def get_model_metadata(self, limit: int) -> list[dict[str, tp.Any]]:
-        """Получение результатов model_metadata"""
+    async def preload_collections(self) -> None:
+        """Предзагрузка коллекций в память."""
 
     @abc.abstractmethod
     async def index_documents(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: list[dict[str, tp.Any]] | None = None,
     ) -> None:
         """Индексация документов в vector_db."""
 
@@ -75,15 +64,19 @@ class IVectorDatabase(abc.ABC):
         self,
         collection_name: str,
         model: SentenceTransformer,
-        documents: list[str],
-        metadata: pd.DataFrame | None,
-        recreate: bool,
+        documents: list[str] | None = None,
+        metadata: list[dict[str, tp.Any]] | None = None,
+        recreate: bool = False,
     ) -> None:
-        """Гарантирует готовность коллекции (актуальная модель) и пересоздаёт при необходимости"""
+        """Гарантирует готовность коллекции (создаёт или пересоздаёт при необходимости)."""
 
     @abc.abstractmethod
     async def initialize_collection(
-        self, collection_name: str, model: SentenceTransformer, documents: list[str]
+        self,
+        collection_name: str,
+        model: SentenceTransformer,
+        documents: list[str],
+        metadata: list[dict[str, tp.Any]] | None = None,
     ) -> None:
         """Инициализация коллекции с текущей моделью."""
 

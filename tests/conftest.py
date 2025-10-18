@@ -13,8 +13,9 @@ from testcontainers.redis import RedisContainer
 from app.api.v1.routers.base import router as base_router
 from app.api.v1.routers.taskmanager import router as taskmanager_router
 from app.common.logger import LoggerType
-from app.infrastructure.ioc import ApplicationProvider
-from app.infrastructure.providers import AuthProvider, LoggerProvider, RedisProvider
+from app.common.providers import AuthProvider
+from app.infrastructure.ioc.search_ioc import ApplicationProvider
+from app.infrastructure.providers import LoggerProvider, RedisProvider
 from app.settings.config import (
     AppSettings,
     RedisSettings,

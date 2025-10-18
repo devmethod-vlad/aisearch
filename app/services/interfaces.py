@@ -2,7 +2,6 @@ import abc
 import typing as tp
 from typing import Optional
 
-from sentence_transformers import SentenceTransformer, CrossEncoder
 
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 

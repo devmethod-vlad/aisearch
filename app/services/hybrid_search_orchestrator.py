@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import json
+import logging
 import time
 import typing as tp
 
@@ -12,11 +13,12 @@ from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
     IBM25Adapter,
     ICrossEncoderAdapter,
-    ILLMQueue,
     IOpenSearchAdapter,
     IRedisSemaphore,
 )
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.storages.interfaces import IVectorDatabase
+from app.infrastructure.utils.metrics import init_logger
 from app.infrastructure.utils.nlp import hash_query, normalize_query
 from app.services.interfaces import IHybridSearchOrchestrator
 from app.settings.config import Settings
@@ -47,14 +49,17 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.settings = settings.hybrid
         self.switches = settings.switches
         self.use_cache = settings.app.use_cache
+        self.normalize_query = settings.app.normalize_query
         self.dense_top_k = settings.hybrid.dense_top_k
         self.model = SentenceTransformer(settings.milvus.model_name)
-        self.logger = logger
+
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
         self.response_metrics_enabled = settings.search_metrics.response_metrics_enabled
         self.merge_top_k = settings.hybrid.merge_top_k
         self.merge_fields = settings.hybrid.merge_fields
         self.dense_metric = settings.milvus.metric_type
+        self.reranker_pairs_fields = settings.reranker.pairs_fields
+        self.logger = logger
 
     async def documents_search(
             self,
@@ -85,13 +90,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         metrics["json_parse_time"] = self._metrics_logger("🕒 JSON parse", json_parse_start)
 
         # ---- Normalize query ----
-        normalize_start = time.perf_counter()
-        # query = normalize_query(pack["query"])
-        query = pack["query"]
-        query_hash = hash_query(query)
-        top_k = int(pack["top_k"])
-        metrics["normalize_time"] = self._metrics_logger("🕒 Normalize query", normalize_start)
-
+        if self.normalize_query:
+            normalize_start = time.perf_counter()
+            query = normalize_query(pack["query"])
+            query_hash = hash_query(query)
+            top_k = int(pack["top_k"])
+            metrics["normalize_time"] = self._metrics_logger("🕒 Normalize query", normalize_start)
+        else:
+            query = pack["query"]
+            top_k = int(pack["top_k"])
+            query_hash = pack["query"]
         need_ack = True
         try:
             async with self.sem.acquire():
@@ -109,7 +117,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     # ---- Embedding ----
                     encode_start = time.perf_counter()
                     query_vector = (await asyncio.to_thread(
-                        self.model.encode, [query], convert_to_numpy=True
+                        self.model.encode, [query], convert_to_numpy=True, normalize_embeddings=True
                     ))[0]
                     metrics["embedding_time"] = self._metrics_logger("🕒 Model encode", encode_start)
 
@@ -374,7 +382,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         return items[:top_k]
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
-        fields = self.merge_fields
+        fields = self.reranker_pairs_fields
         parts: list[str] = []
 
         for f in fields:

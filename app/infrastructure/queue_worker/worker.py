@@ -1,6 +1,8 @@
 from __future__ import annotations
 import asyncio
 import json
+import logging
+import os
 import typing as tp
 
 from celery import Celery
@@ -8,9 +10,12 @@ from celery import Celery
 from dishka import AsyncContainer, make_async_container
 
 from app.common.storages.interfaces import KeyValueStorageProtocol
-from app.infrastructure.adapters.interfaces import ILLMQueue
+
 from app.common.logger import AISearchLogger, LoggerType
-from app.settings.config import settings, Settings, HybridSearchSettings
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
+from app.infrastructure.ioc.queue_ioc import QueueSlimProvider
+
+from app.settings.config import settings, Settings
 
 container: AsyncContainer | None = None
 logger: AISearchLogger | None = None
@@ -18,8 +23,8 @@ logger: AISearchLogger | None = None
 # ---- Celery client (лёгкий) ----
 celery_client = Celery(
     "queue-pump",
-    broker=str(settings.redis.dsn),      # redis://.../7  ← брокер Celery
-    backend=str(settings.redis.dsn),     # можно вынести в db 8
+    broker=str(settings.redis.dsn),
+    backend=str(settings.redis.dsn),
 )
 celery_client.conf.update(
     task_create_missing_queues=True,
@@ -30,45 +35,70 @@ celery_client.conf.update(
 )
 
 def init_container() -> AsyncContainer:
-    global container, logger
-    from app.infrastructure.ioc import ApplicationProvider
-    from app.infrastructure.providers import LoggerProvider, MilvusProvider, RedisProvider
+    global container
+
+    from app.infrastructure.providers import LoggerProvider, RedisProvider
     from app.settings.config import (
         AppSettings,
         LLMGlobalSemaphoreSettings,
         LLMQueueSettings,
-        MilvusSettings,
         RedisSettings,
-        VLLMSettings,
     )
 
     container = make_async_container(
-        ApplicationProvider(),
+        QueueSlimProvider(),
         LoggerProvider(),
-        MilvusProvider(),
         RedisProvider(),
         context={
             AppSettings: settings.app,
             Settings: settings,
-            MilvusSettings: settings.milvus,
             RedisSettings: settings.redis,
-            LoggerType: LoggerType.CELERY,
-            HybridSearchSettings: settings.hybrid,
+            LoggerType: LoggerType.QUEUE,
             LLMGlobalSemaphoreSettings: settings.llm_global_sem,
             LLMQueueSettings: settings.llm_queue,
-            VLLMSettings: settings.vllm,
         },
     )
-    logger = AISearchLogger(logger_type=LoggerType.CELERY)
     return container
+
+
+def init_global_logger() -> AISearchLogger:
+    """
+    Инициализирует ЕДИНЫЙ глобальный логгер для всего процесса.
+    Вызывается один раз в main_async().
+    """
+    global logger
+
+    if logger is not None:
+        return logger
+
+    logger = AISearchLogger(logger_type=LoggerType.QUEUE)
+
+    log_dir = logger._determine_logpath()
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, "logs.log")
+
+    # Добавляем FileHandler только если его еще нет
+    if not any(isinstance(h, logging.FileHandler) and h.baseFilename == os.path.abspath(log_path)
+               for h in logger.handlers):
+        fh = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s",
+                                      "%Y-%m-%d %H:%M:%S")
+        fh.setFormatter(formatter)
+        logger.addHandler(fh)
+
+    return logger
+
 
 async def _queue_drain_loop() -> None:
     """Фоновая корутина: ждёт тикеты и шлёт их в Celery"""
+    global logger
     assert container is not None
+    assert logger is not None
+
     queue = await container.get(ILLMQueue)
     redis_storage = await container.get(KeyValueStorageProtocol)
-    logger = await container.get(AISearchLogger)
     logger.info("🚩 Старт корутины работы с очередью")
+
     while True:
         item = await queue.dequeue_blocking(timeout=1)
         if not item:
@@ -97,7 +127,7 @@ async def _queue_drain_loop() -> None:
                     "search_task",
                     args=(ticket_id, payload["pack_key"], payload["result_key"]),
                     queue="gpu-search",
-                    task_id=ticket_id  # удобно связывать тикет и task_id
+                    task_id=ticket_id
                 )
 
             elif task_type == "generate":
@@ -118,12 +148,16 @@ async def _queue_drain_loop() -> None:
             logger.info(f"🧹 УБИРАЕМ ТИКЕТ ИЗ PROCESSING {ticket_id}")
             await queue.ack(ticket_id)
 
+
 async def _processing_sweeper(period_sec: int = 10, stale_sec: int = 60) -> None:
     """Переставляет протухшие тикеты обратно в очередь"""
+    global logger
     assert container is not None
+    assert logger is not None
+
     queue = await container.get(ILLMQueue)
-    logger = await container.get(AISearchLogger)
     logger.info("🚩 Старт корутины очистки застрявших тикетов")
+
     while True:
         try:
             n = await queue.sweep_processing(stale_sec=stale_sec)
@@ -133,8 +167,16 @@ async def _processing_sweeper(period_sec: int = 10, stale_sec: int = 60) -> None
             logger.error(f"⚠️ sweep_processing error: {e}")
         await asyncio.sleep(period_sec)
 
+
 async def main_async() -> None:
+    global logger
+
+    # Инициализируем контейнер и ЕДИНЫЙ логгер
     init_container()
+    logger = init_global_logger()
+
+    logger.info("🚀 Запуск queue worker")
+
     drain_task = asyncio.create_task(_queue_drain_loop())
     sweeper_task = asyncio.create_task(_processing_sweeper())
     logger = await container.get(AISearchLogger)
@@ -146,6 +188,7 @@ async def main_async() -> None:
         drain_task.cancel()
         sweeper_task.cancel()
         await asyncio.gather(drain_task, sweeper_task, return_exceptions=True)
+
 
 if __name__ == "__main__":
     asyncio.run(main_async())

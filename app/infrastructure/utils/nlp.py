@@ -59,12 +59,13 @@ def hash_query(normalized_query: str) -> str:
     return hashlib.md5(normalized_query.encode("utf-8")).hexdigest()
 
 
-def normalize_query(query: str) -> str:
+def normalize_query(query: str, morph: pymorphy3.MorphAnalyzer | None = None) -> str:
     """Нормализация запроса"""
     from nltk.corpus import stopwords
     from nltk.tokenize import word_tokenize
 
-    morph = pymorphy3.MorphAnalyzer()
+    if morph is None:
+        morph = pymorphy3.MorphAnalyzer()
     stop_words = set(stopwords.words("russian"))
     text = query.strip().replace("\xa0", " ").replace("\n", " ")
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 import asyncio
 import threading
+import traceback
 import typing as tp
 from asyncio import Future
 from typing import TYPE_CHECKING
@@ -13,6 +14,7 @@ from celery.signals import (
 )
 
 from app.services.interfaces import IHybridSearchOrchestrator
+from pre_launch import load_collection_and_index
 
 if TYPE_CHECKING:
     from dishka import AsyncContainer
@@ -33,7 +35,7 @@ worker = Celery(
     "aisearch",
     broker=str(settings.redis.dsn),
     backend=str(settings.redis.dsn),
-    include=["app.infrastructure.worker.tasks"],
+    include=["app.infrastructure.search_worker.tasks"],
 )
 
 worker.conf.update(
@@ -50,7 +52,7 @@ worker.conf.update(
     result_expires=600,
 )
 
-worker.autodiscover_tasks(["app.infrastructure.worker.tasks"])
+worker.autodiscover_tasks(["app.infrastructure.search_worker.tasks"])
 
 # --- Единый event loop ---
 loop = asyncio.new_event_loop()
@@ -67,10 +69,10 @@ def on_after_configure(**kwargs: dict[str, tp.Any]) -> None:
 def init_container_and_model() -> AsyncContainer:
     """Инициализация контейнера Dishka"""
     global container  # noqa: PLW0603
-    from app.infrastructure.ioc import ApplicationProvider
+    from app.infrastructure.ioc.search_ioc import ApplicationProvider
+    from app.infrastructure.storages.milvus_provider import MilvusProvider
     from app.infrastructure.providers import (
         LoggerProvider,
-        MilvusProvider,
         RedisProvider,
     )
     from app.settings.config import (
@@ -113,6 +115,12 @@ def on_worker_process_init(**kwargs: dict[str, tp.Any]) -> None:
     init_container_and_model()
     global successful_warmup
 
+    try:
+        from app.infrastructure.utils.nlp import init_nltk_resources
+        init_nltk_resources()
+        logger and logger.info("📚 NLTK ресурсы готовы")
+    except Exception as e:
+        logger and logger.warning(f"⚠️ Ошибка при инициализации NLTK: {e!r}")
     # стартуем event loop в отдельном потоке
     def _start_loop() -> None:
         asyncio.set_event_loop(loop)

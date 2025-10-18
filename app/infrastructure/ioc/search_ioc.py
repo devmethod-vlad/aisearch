@@ -8,11 +8,11 @@ from app.infrastructure.adapters.cross_encoder import CrossEncoderAdapter
 from app.infrastructure.adapters.interfaces import (
     IBM25Adapter,
     ICrossEncoderAdapter,
-    ILLMQueue,
     IOpenSearchAdapter,
     IRedisSemaphore,
     IVLLMAdapter,
 )
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.adapters.llm_adapter import VLLMAdapter
 from app.infrastructure.adapters.open_search import OpenSearchAdapter
 from app.infrastructure.adapters.queue import LLMQueue
@@ -20,13 +20,12 @@ from app.infrastructure.adapters.semaphore import RedisSemaphore
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.storages.milvus import MilvusDatabase
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
-from app.services.hybrid_search_service import HybridSearchService
+
 from app.services.interfaces import (
     IHybridSearchOrchestrator,
-    IHybridSearchService,
-    ITaskManagerService,
+
 )
-from app.services.taskmanager import TaskManagerService
+
 from app.settings.config import (
     AppSettings,
     MilvusSettings,
@@ -53,12 +52,7 @@ class ApplicationProvider(Provider):
     )
     milvus_database = provide(MilvusDatabase, scope=Scope.APP, provides=IVectorDatabase)
 
-    taskmanager_service = provide(
-        TaskManagerService, scope=Scope.REQUEST, provides=ITaskManagerService
-    )
-    hybrid_search_service = provide(
-        HybridSearchService, scope=Scope.REQUEST, provides=IHybridSearchService
-    )
     hybrid_search_orchestrator = provide(
         HybridSearchOrchestrator, scope=Scope.APP, provides=IHybridSearchOrchestrator
     )
+

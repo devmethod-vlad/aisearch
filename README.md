@@ -36,6 +36,7 @@
     APP_USE_CACHE=false  # Использовать ли кэширование
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
+    APP_NORMALIZE_QUERY=true # Нормализовать ли запрос
 
     GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
     GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn
@@ -65,13 +66,16 @@
     MILVUS_CONNECTION_TIMEOUT=120
     MILVUS_QUERY_TIMEOUT=30
     MILVUS_METRIC_TYPE=IP
-    MILVUS_PRELOADED_COLLECTION_NAMES=med_rag,kb_default
+    MILVUS_COLLECTION_NAME=kb_default
+    MILVUS_DATA_SEARCHFIELDS=question
     MILVUS_RECREATE_COLLECTION=false
     MILVUS_VECTOR_FIELD=embedding
     MILVUS_ID_FIELD=pk
     MILVUS_OUTPUT_FIELDS=ext_id,question,analysis,answer
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
+    MILVUS_MODEL=USER-bge-m3
+    MILVUS_SCHEMA_PATH=app/config/conf.json
 
     # === Очередь LLM (для отложенной генерации, если нет слота семафора) ===
     LLM_QUEUE_LIST_KEY=llm:queue:list
@@ -115,7 +119,7 @@
     # === OpenSearch ===
     OS_HOST=aisearch-opensearch
     OS_PORT=9200
-    OS_INDEX_NAME=kb_lex_ru
+    OS_INDEX_NAME=aisearch-qa
     OS_USE_SSL=false
     OS_VERIFY_CERTS=false
     OS_USER=
@@ -129,6 +133,7 @@
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000
     OS_RECREATE_INDEX=true
+    OS_SCHEMA_PATH=app/config/os_index.json
     
     NLTK_DATA_HOST_PATH=E:/nltk    # выкачка ресурсов через python -m nltk.downloader -d путь_к_папке punkt stopwords punkt_tab
     NLTK_DATA_CONTR_PATH=/srv/nltk_data
@@ -148,6 +153,8 @@
 
     CELERY_LOGS_HOST_PATH=./logs/celery
     CELERY_LOGS_CONTR_PATH=/usr/src/logs/celery
+    CELERY_LOGS_QUEUE_HOST_PATH=./logs/queue
+    CELERY_LOGS_QUEUE_CONTR_PATH=/usr/src/logs/queue
     CELERY_WORKERS_NUM=2
 
     # === Глобальный семафор (общий лимит конкаренси для поиска и генерации) ===
@@ -165,6 +172,8 @@
     RERANKER_DTYPE=fp16
     RERANKER_SCORE_MOD=sigmoid
     RERANKER_SOFTMAX_TEMP=0.7
+    RERANKER_MODEL=cross-encoder-russian-msmarco
+    RERANKER_PAIRS_FIELDS=question,analysis,answer
 
     # === vLLM (локальный OpenAI-совместимый сервер) ===
     VLLM_BASE_URL=http://aisearch-vllm:8000/v1
@@ -198,7 +207,7 @@
 ## Сборка на примере базового образа для Bash
 ```
 ( set -a; . <(sed 's/\r$//' .env); set +a;
-  DOCKER_BUILDKIT=0 docker build -f Dockerfile_base -t "$IMAGE_NAME_BASE" \
+  DOCKER_BUILDKIT=0 docker build -f Dockerfile_search_base -t "$IMAGE_NAME_BASE" \
     --build-arg http_proxy="$HTTP_PROXY" --build-arg https_proxy="$HTTPS_PROXY" \
     --build-arg HTTP_PROXY="$HTTP_PROXY" --build-arg HTTPS_PROXY="$HTTPS_PROXY" . && \
   docker tag "$IMAGE_NAME_BASE" "$REGISTRY/$IMAGE_NAME_BASE" && \
@@ -216,7 +225,7 @@
       Set-Item Env:$n ($v.Trim([char]34,[char]39,[char]96).Trim())
     }
 
-  docker build -f Dockerfile_base -t $env:IMAGE_NAME_BASE `
+  docker build -f Dockerfile_search_base -t $env:IMAGE_NAME_BASE `
     --build-arg http_proxy=$env:HTTP_PROXY `
     --build-arg https_proxy=$env:HTTPS_PROXY `
     --build-arg HTTP_PROXY=$env:HTTP_PROXY `

@@ -6,7 +6,7 @@ import logging
 import os
 import traceback
 
-import pandas as pd
+
 import torch
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
@@ -18,7 +18,7 @@ async def load_collection_and_index(
     collection_name: str = "kb_default",
     column_for_vector: str = "question",
 ) -> None:
-    """Загрузить коллекцию в Milvus DB"""
+    """Загрузить коллекцию в Milvus DB и обновить индексы."""
     from app.infrastructure.storages.milvus import MilvusDatabase
 
     milvus = MilvusDatabase(settings=settings.milvus, logger=logger)
@@ -29,19 +29,24 @@ async def load_collection_and_index(
     model = SentenceTransformer(settings.milvus.model_name)
     logger.info("Модель успешно загружена")
 
+    # читаем parquet, но превращаем сразу в list[str] и list[dict]
+    import pandas as pd
+
     df = pd.read_parquet(f"{collection_name}.parquet")
     df = df[
         df[column_for_vector].notna() & (df[column_for_vector].astype(str).str.len() > 0)
     ].reset_index(drop=True)
 
+    documents = df[column_for_vector].astype(str).tolist()
+    metadata = df.to_dict(orient="records")
+    # --- OpenSearch ---
     if settings.milvus.recreate_collection or settings.opensearch.recreate_index:
         from app.infrastructure.adapters.open_search import OpenSearchAdapter
 
         os_adapter = OpenSearchAdapter(settings=settings, logger=logger)
         os_adapter.build_index(data=df)
 
-    documents = df[column_for_vector].tolist()
-
+    # --- BM25 ---
     if settings.milvus.recreate_collection or settings.bm25.recreate_index:
         from app.infrastructure.adapters.bm25 import BM25Adapter
 
@@ -49,18 +54,20 @@ async def load_collection_and_index(
             data=df, index_path=settings.bm25.index_path, texts=documents, logger=logger
         )
 
-    await milvus.initialize_model_metadata_collection()
+    # --- Milvus ---
     try:
         await milvus.ensure_collection(
             collection_name=collection_name,
             model=model,
             documents=documents,
-            metadata=df,
+            metadata=metadata,
             recreate=settings.milvus.recreate_collection,
         )
     except Exception as e:
-        logger.error(f"Произошла ошибка при загрузке коллекции: {e}")
+        logger.error(f"Произошла ошибка при загрузке коллекции: {e!r}")
         await milvus.delete_collection(collection_name=collection_name)
+
+    await milvus.preload_collections()
 
     await milvus.close()
     del model
@@ -75,7 +82,7 @@ async def pre_launch() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--local", action="store_true")
     parser.add_argument(
-        "--logtype", help="Тип логирования", choices=["app", "value"], default="app"
+        "--logtype", help="Тип логирования", choices=["app", "celery"], default="app"
     )
     parser.add_argument("--load", help="Загрузка коллекции в Milvus DB", action="store_true")
     args = parser.parse_args()

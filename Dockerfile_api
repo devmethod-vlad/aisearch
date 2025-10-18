@@ -1,0 +1,10 @@
+FROM python:3.12-slim
+
+WORKDIR /backend
+
+RUN pip install --upgrade pip uv
+
+COPY buildeps/api/pyproject.toml ./buildeps/api/pyproject.toml
+
+RUN uv pip compile buildeps/api/pyproject.toml -o requirements.lock \
+ && uv pip sync --system requirements.lock

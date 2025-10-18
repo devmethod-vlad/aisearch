@@ -1,0 +1,29 @@
+{
+  "fields": [
+    { "name": "pk", "dtype": "INT64", "description": "Primary key ID", "is_primary": true, "auto_id": true },
+    { "name": "embedding", "dtype": "FLOAT_VECTOR", "description": "Vector embeddings of documents", "dim": 1024},
+    { "name": "row_idx", "dtype": "VARCHAR", "description": "Row index", "max_length": 65535, "nullable":  true },
+    { "name": "source", "dtype": "VARCHAR", "description": "Source type (PDF, DOCX, etc.)", "max_length": 65535, "nullable":  true },
+    { "name": "ext_id", "dtype": "VARCHAR", "description": "External document ID", "max_length": 65535, "nullable":  true },
+    { "name": "page_id", "dtype": "VARCHAR", "description": "Page identifier in the document", "max_length": 65535, "nullable":  true },
+    { "name": "role", "dtype": "VARCHAR", "description": "Role or speaker in the context", "max_length": 65535, "nullable":  true},
+    { "name": "component", "dtype": "VARCHAR", "description": "Document component or section", "max_length": 65535, "nullable": true},
+    { "name": "question", "dtype": "VARCHAR", "description": "Question text", "max_length": 65535, "nullable": true},
+    { "name": "analysis", "dtype": "VARCHAR", "description": "Analytical interpretation of question", "max_length": 65535, "nullable": true },
+    { "name": "answer", "dtype": "VARCHAR", "description": "Generated or stored answer", "max_length": 65535, "nullable": true}
+  ],
+  "indexes": [
+    {
+      "field_name": "embedding",
+      "index_type": "HNSW",
+      "metric_type": "IP",
+      "params": { "M": 16, "efConstruction": 200 }
+    },
+    { "field_name": "ext_id", "index_type": "INVERTED" },
+    { "field_name": "source", "index_type": "INVERTED" },
+    { "field_name": "page_id", "index_type": "INVERTED" }
+  ],
+  "search_params": {
+    "embedding": { "ef": 128 }
+  }
+}
