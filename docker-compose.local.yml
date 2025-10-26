@@ -77,10 +77,31 @@ services:
       - default
 
   attu:
+    image: zilliz/attu:v2.5.0
+    container_name: aisearch-attu
+    ports:
+      - 8010:3000
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
     networks:
       - default
 
   aisearch-opensearch:
+    networks:
+      - default
+
+  aisearch-os-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    container_name: aisearch-os-dashboards
+    environment:
+      OPENSEARCH_HOSTS: '["http://aisearch-opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
+    ports:
+      - "5601:5601"
+    depends_on:
+      aisearch-opensearch:
+        condition: service_healthy
     networks:
       - default
 

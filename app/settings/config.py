@@ -45,9 +45,9 @@ class MilvusSettings(EnvBaseSettings):
     recreate_collection: bool = False
     vector_field: str = "embedding"
     schema_path: str = "app/config/conf.json"
-    data_searchfields: str = "question"
     id_field: str = "ext_id"
     metric_type: str = "IP"
+    search_fields: str = "question"
     output_fields: str | list[str] = (
         "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
     )
@@ -122,14 +122,15 @@ class HybridSearchSettings(EnvBaseSettings):
     cache_ttl: int = 3600
     version: str = "v1"
     collection_name: str = "kb_default"
-    merge_top_k: int = 20
-    merge_fields: str | list[str] # 👈 Новое поле
+    merge_by_field: str = "ext_id"
+    merge_fields: str | list[str] = "ext_id,question,analysis,answer"
 
     @model_validator(mode="after")
     def assemble_hybrid_settings(self) -> tp.Self:
         """Парсинг merge_fields из строки в список"""
         if isinstance(self.merge_fields, str):
             self.merge_fields = [f.strip() for f in self.merge_fields.split(",") if f.strip()]
+
         return self
 
     model_config = SettingsConfigDict(env_prefix="hybrid_")
@@ -180,8 +181,8 @@ class OpenSearchSettings(EnvBaseSettings):
     verify_certs: bool = False
     user: str | None = None
     password: str | None = None
-    # query_profile: str = "fast"
-    # query_fields: str = "question,analysis,answer"
+    search_fields: str | list[str] = "question,analysis,answer"
+    output_fields: str | list[str] = "ext_id,question,analysis,answer"
     operator: str = "or"
     min_should_match: int = 1
     fuzziness: int = 0
@@ -192,15 +193,36 @@ class OpenSearchSettings(EnvBaseSettings):
     recreate_index: bool = True
     model_config = SettingsConfigDict(env_prefix="os_")
 
+    @model_validator(mode="after")
+    def assemble_os_settings(self) -> tp.Self:
+        """Парсинг fields из строки в список"""
+        if isinstance(self.search_fields, str):
+            self.search_fields = [f.strip() for f in self.search_fields.split(",") if f.strip()]
+        if isinstance(self.output_fields, str):
+            self.output_fields = [f.strip() for f in self.output_fields.split(",") if f.strip()]
+
+        return self
+
 
 class BM25Settings(EnvBaseSettings):
     """Настройки BM25"""
 
     engine: str = "whoosh"
     index_path: str = "/data/bm25_index"
-    schema_fields: str = "question,analysis,answer"
+    schema_fields: str | list[str] = "ext_id,question,analysis,answer"
+    output_fields: str | list[str] = "ext_id,question,analysis,answer"
     recreate_index: bool = False
     model_config = SettingsConfigDict(env_prefix="bm25_")
+
+    @model_validator(mode="after")
+    def assemble_bm25_settings(self) -> tp.Self:
+        """Парсинг fields из строки в список"""
+        if isinstance(self.schema_fields, str):
+            self.schema_fields = [f.strip() for f in self.schema_fields.split(",") if f.strip()]
+        if isinstance(self.output_fields, str):
+            self.output_fields = [f.strip() for f in self.output_fields.split(",") if f.strip()]
+
+        return self
 
 class SlowAPISettings(EnvBaseSettings):
     """Настройки slowapi лимитов"""
@@ -228,6 +250,7 @@ class RerankerSettings(EnvBaseSettings):
         """Парсинг pairs_fields из строки в список"""
         if isinstance(self.pairs_fields, str):
             self.pairs_fields = [f.strip() for f in self.pairs_fields.split(",") if f.strip()]
+            
         return self
 
 

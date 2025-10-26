@@ -10,7 +10,7 @@ from dishka import AsyncContainer
 import redis.asyncio as redis
 
 
-from app.api.v1.dto.responses.hybrid_search import SearchResult
+# from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.logger import AISearchLogger, LoggerType
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
@@ -118,7 +118,8 @@ def generate_answer_task(
                 cache_key = f"hyb:{query_hash}:{top_k}:{settings.version}"
                 cached = await redis.get(cache_key)
                 if cached:
-                    results = [SearchResult(**x) for x in json.loads(cached)]
+                    # results = [SearchResult(**x) for x in json.loads(cached)]
+                    results = json.loads(cached)
                 else:
                     # dense = await milvus.search(query, top_k=settings.dense_top_k)
                     dense = await milvus.search(
@@ -139,10 +140,12 @@ def generate_answer_task(
                         for m, s in zip(merged, ce_scores):
                             m["score_ce"] = float(s)
                     _results = _score_and_slice(merged, top_k, use_ce=switches.use_reranker)
-                    results = [SearchResult(**r) for r in _results]
+                    # results = [SearchResult(**r) for r in _results]
+                    results = _results
                     await redis.set(
                         cache_key,
-                        json.dumps([r.model_dump() for r in results]),
+                        # json.dumps([r.model_dump() for r in results]),
+                        results,
                         ttl=settings.cache_ttl,
                     )
 
@@ -160,7 +163,11 @@ def generate_answer_task(
                     temperature=vllm_settings.temperature,
                     top_p=vllm_settings.top_p,
                 )
-                payload = {"answer": answer_text, "results": [r.model_dump() for r in results]}
+                payload = {
+                    "answer": answer_text, 
+                    # "results": [r.model_dump() for r in results]
+                    "results": results
+                }
                 await redis.set(
                     result_key, json.dumps(payload, ensure_ascii=False), ttl=queue.ticket_ttl
                 )

@@ -34,17 +34,31 @@
       "source":    { "type": "keyword" },
       "ext_id":    { "type": "keyword" },
       "page_id":   { "type": "keyword" },
+      "actual":    { "type": "keyword" },
+      "second_line": { "type": "keyword" },
       "role":      { "type": "keyword" },
+      "product":   { "type": "keyword" },
+      "space":     { "type": "keyword" },
       "component": { "type": "keyword" },
-
+      
+      "question_md": {
+        "type": "text",
+        "analyzer": "ru_mixed",
+        "fields": { "kw": { "type": "keyword", "ignore_above": 1024 } }
+      },
       "question": {
         "type": "text",
         "analyzer": "ru_mixed",
         "fields": { "kw": { "type": "keyword", "ignore_above": 1024 } }
       },
-      "analysis": { "type": "text", "analyzer": "ru_mixed" },
-
-      "answer":   { "type": "text", "analyzer": "ru_mixed" }
+      
+      "analysis_md": { "type": "text", "analyzer": "ru_mixed" },
+      "analysis":    { "type": "text", "analyzer": "ru_mixed" },
+      
+      "answer_md": { "type": "text", "analyzer": "ru_mixed" },
+      "answer":    { "type": "text", "analyzer": "ru_mixed" },
+      
+      "for_user":  { "type": "keyword" }
     }
   }
 }

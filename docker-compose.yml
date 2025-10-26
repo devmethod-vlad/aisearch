@@ -68,6 +68,7 @@ services:
       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL}
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - WORKER_ID=search@celery-w1
 
     depends_on:
       aisearch-milvus:
@@ -138,14 +139,6 @@ services:
       - aisearch-etcd
       - aisearch-minio
 
-  attu:
-    image: zilliz/attu:v2.5.0
-    container_name: aisearch-attu
-    ports:
-      - 8010:3000
-    depends_on:
-      - aisearch-milvus
-
   aisearch-opensearch:
     image: opensearchproject/opensearch:2.12.0
     container_name: aisearch-opensearch
@@ -156,6 +149,8 @@ services:
       - plugins.security.disabled=true
       - DISABLE_INSTALL_DEMO_CONFIG=true
       - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - ${OS_VOLUME_HOST_PATH}:${OS_VOLUME_CONTR_PATH}
     ulimits:
       memlock:
         soft: -1

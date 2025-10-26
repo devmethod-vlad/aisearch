@@ -28,6 +28,7 @@ async def get_documents(
     query = body.query
     top_k = body.top_k
     response = await service.enqueue_search(query=query, top_k=top_k)
+    print("search response: \n", response)
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 
 
@@ -54,4 +55,5 @@ async def get_task_status(
 ) -> JSONResponse:
     """Проверяет статус задачи по ticket_id."""
     response = await service.get_task_status(ticket_id)
+    print("info response: \n", response)
     return JSONResponse(content=jsonable_encoder(response, exclude_none=True), status_code=200)

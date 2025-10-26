@@ -56,7 +56,7 @@ class IOpenSearchAdapter(abc.ABC):
     """Адаптер OpenSearch"""
 
     @abc.abstractmethod
-    def build_index(self, data: pd.DataFrame) -> None:
+    def build_index(self, data: list[dict[str, tp.Any]]) -> None:
         """Построение индекса"""
 
     @abc.abstractmethod
@@ -70,7 +70,7 @@ class IBM25Adapter(abc.ABC):
     @staticmethod
     @abc.abstractmethod
     def build_index(
-        data: pd.DataFrame, index_path: str, texts: list[str], logger: AISearchLogger
+        data: list[dict[str, tp.Any]], index_path: str, texts: list[str], logger: AISearchLogger
     ) -> None:
         """Построение индекса"""
 
@@ -80,9 +80,7 @@ class IBM25Adapter(abc.ABC):
 
     @abc.abstractmethod
     def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
-        """Возвращает список кандидатов:
-        [{"ext_id","question","analysis","answer","score_bm25","source":"bm25"}, ...]
-        """
+        """Возвращает список кандидатов"""
 
 
 class ICrossEncoderAdapter(abc.ABC):

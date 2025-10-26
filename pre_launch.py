@@ -16,14 +16,18 @@ async def load_collection_and_index(
     settings: BaseSettings,
     logger: logging.Logger,
     collection_name: str = "kb_default",
-    column_for_vector: str = "question",
 ) -> None:
     """Загрузить коллекцию в Milvus DB и обновить индексы."""
+    
+    column_for_vector = settings.milvus.search_fields
+    
     from app.infrastructure.storages.milvus import MilvusDatabase
 
     milvus = MilvusDatabase(settings=settings.milvus, logger=logger)
 
-    logger.info(f"Выполняется загрузка модели {settings.milvus.model_name.split('/')[-1]} ...")
+    logger.info(
+        f"Выполняется загрузка модели {settings.milvus.model_name.split('/')[-1]} ..."
+    )
     from sentence_transformers import SentenceTransformer
 
     model = SentenceTransformer(settings.milvus.model_name)
@@ -34,7 +38,10 @@ async def load_collection_and_index(
 
     df = pd.read_parquet(f"{collection_name}.parquet")
     df = df[
-        df[column_for_vector].notna() & (df[column_for_vector].astype(str).str.len() > 0)
+        df[column_for_vector].notna()
+        & (df[column_for_vector].astype(str).str.len() > 0)
+        & (df["answer"].astype(str).str.len() > 2)
+        & (df["for_user"] == "Да")
     ].reset_index(drop=True)
 
     documents = df[column_for_vector].astype(str).tolist()
@@ -44,14 +51,17 @@ async def load_collection_and_index(
         from app.infrastructure.adapters.open_search import OpenSearchAdapter
 
         os_adapter = OpenSearchAdapter(settings=settings, logger=logger)
-        os_adapter.build_index(data=df)
+        os_adapter.build_index(data=df.to_dict(orient="records"))
 
     # --- BM25 ---
     if settings.milvus.recreate_collection or settings.bm25.recreate_index:
         from app.infrastructure.adapters.bm25 import BM25Adapter
 
         BM25Adapter.build_index(
-            data=df, index_path=settings.bm25.index_path, texts=documents, logger=logger
+            data=df[settings.bm25.schema_fields].to_dict(orient="records"),
+            index_path=settings.bm25.index_path,
+            texts=documents,
+            logger=logger,
         )
 
     # --- Milvus ---
@@ -84,12 +94,16 @@ async def pre_launch() -> None:
     parser.add_argument(
         "--logtype", help="Тип логирования", choices=["app", "celery"], default="app"
     )
-    parser.add_argument("--load", help="Загрузка коллекции в Milvus DB", action="store_true")
+    parser.add_argument(
+        "--load", help="Загрузка коллекции в Milvus DB", action="store_true"
+    )
     args = parser.parse_args()
 
     if args.local:
         os.environ["MILVUS_HOST"] = "localhost"
-        os.environ["MILVUS_MODEL_NAME"] = os.environ["APP_MODELSTORE_HOST_PATH"] + "/LaBSE-ru-turbo"
+        os.environ["MILVUS_MODEL_NAME"] = (
+            os.environ["APP_MODELSTORE_HOST_PATH"] + "/LaBSE-ru-turbo"
+        )
         os.environ["RERANKER_MODEL_NAME"] = (
             os.environ["APP_MODELSTORE_HOST_PATH"] + "/cross-encoder-russian-msmarco"
         )
@@ -110,7 +124,9 @@ async def pre_launch() -> None:
         try:
             await load_collection_and_index(settings, logger)
         except Exception as e:
-            logger.error(f"Ошибка при ожидании базы данных: ({type(e)}): {traceback.format_exc()}")
+            logger.error(
+                f"Ошибка при ожидании базы данных: ({type(e)}): {traceback.format_exc()}"
+            )
             raise e
 
 

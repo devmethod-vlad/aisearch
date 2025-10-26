@@ -1,13 +1,11 @@
 import asyncio
 import contextlib
 import json
-import logging
 import time
 import typing as tp
 
 from sentence_transformers import SentenceTransformer
 
-from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
@@ -18,7 +16,6 @@ from app.infrastructure.adapters.interfaces import (
 )
 from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.storages.interfaces import IVectorDatabase
-from app.infrastructure.utils.metrics import init_logger
 from app.infrastructure.utils.nlp import hash_query, normalize_query
 from app.services.interfaces import IHybridSearchOrchestrator
 from app.settings.config import Settings
@@ -48,15 +45,15 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.redis = redis
         self.settings = settings.hybrid
         self.switches = settings.switches
+        self.ce_settings = settings.reranker
+        self.model_name = settings.milvus.model_name
         self.use_cache = settings.app.use_cache
         self.normalize_query = settings.app.normalize_query
-        self.dense_top_k = settings.hybrid.dense_top_k
         self.model = SentenceTransformer(settings.milvus.model_name)
 
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
         self.response_metrics_enabled = settings.search_metrics.response_metrics_enabled
-        self.merge_top_k = settings.hybrid.merge_top_k
-        self.merge_fields = settings.hybrid.merge_fields
+        
         self.dense_metric = settings.milvus.metric_type
         self.reranker_pairs_fields = settings.reranker.pairs_fields
         self.logger = logger
@@ -111,7 +108,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
                     cache_parse_start = time.perf_counter()
-                    results = [SearchResult(**x) for x in json.loads(cached)]
+                    results = [json.loads(cached)]
                     metrics["cache_parse_time"] = self._metrics_logger("🕒 Cache parse", cache_parse_start)
                 else:
                     # ---- Embedding ----
@@ -127,7 +124,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         res = await self.vector_db.search(
                             collection_name=self.settings.collection_name,
                             query_vector=query_vector,
-                            top_k=self.dense_top_k,
+                            top_k=self.settings.dense_top_k,
                         )
                         metrics["vector_search_time"] = self._metrics_logger("🕒 Milvus search", start)
                         return res
@@ -148,30 +145,52 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
 
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
+
+                    print("dense results: ", dense)
+                    print("len(dense) : ", len(dense))
+                    print("lex results: ", lex)
+                    print("len(lex): ", len(lex))
+
                     dense = self._precut_dense(dense)
                     lex = self._precut_lex(lex)
+
+                    print("dense after precut results: ", dense)
+                    print("len(dense) : ", len(dense))
+                    print("lex after precut  results: ", lex)
+                    print("len(lex): ", len(lex))
+
                     for d in dense:
                         d["score_dense"] = self._dense_to_unit(d.get("score_dense", 0.0))
+
+                    print("dense after norm results: ", dense)
+
+                    merged = self._merge_candidates(dense, lex)
+
+                    print("merged: ", merged)
+                    print("len(merged) : ", len(merged))
+
                     # ---- Cross-encoder ----
-                    if self.switches.use_reranker and (dense or lex):
+                    if self.switches.use_reranker and merged:
                         start = time.perf_counter()
-                        pairs = [(query, self._concat_text(m)) for m in (dense + lex)]
+                        pairs = [(query, self._concat_text(m)) for m in merged]
+                        print("pairs: ", pairs)
                         # scores = await asyncio.to_thread(self.ce.rank, pairs)
                         scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
                         scores = self.ce.ce_postprocess(scores)
                         metrics["cross_encoder_time"] = self._metrics_logger("🕒 Cross-encoder rank", start)
-                        for m, s in zip(dense + lex, scores):
+                        for m, s in zip(merged, scores):
                             m["score_ce"] = float(s)
+                        print("merged after rerank: ", merged)
 
-                    merged = self._merge_candidates(dense, lex)
-                    merged = merged[:self.merge_top_k]
-                    _results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
-                    results = [SearchResult(**r) for r in _results]
+                    results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
+
+                    print("results (_score_and_slice): ", results)
+                    print("len(results) : ", len(results))
 
                     if self.use_cache:
                         await self.redis.set(
                             cache_key,
-                            json.dumps([r.model_dump() for r in results]),
+                            results,
                             ttl=self.settings.cache_ttl,
                         )
 
@@ -179,7 +198,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 metrics["total_search_time"] = self._metrics_logger("🕒 Total search", start_total)
 
                 # ---- Payload ----
-                payload = {"results": [r.model_dump() for r in results]}
+                payload = {
+                    "results": results
+                }
                 if self.response_metrics_enabled:
                     payload["metrics"] = {
                         "embedding_time": metrics.get("embedding_time"),
@@ -188,6 +209,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "bm25_time": metrics.get("lexical_search_time") if self.switches.use_bm25 else None,
                         "cross_encoder_time": metrics.get("cross_encoder_time"),
                         "total_time": metrics.get("total_search_time"),
+                        "reranker_enabled": self.switches.use_reranker,
+                        "open_search_enabled": self.switches.use_opensearch,
+                        "bm_25_enabled": self.switches.use_bm25,
+                        "hybrid_dense_top_k": self.settings.dense_top_k,
+                        "hybrid_lex_top_k": self.settings.lex_top_k,
+                        "hybrid_top_k": self.settings.top_k,
+                        "hybrid_w_ce": self.settings.w_ce,
+                        "hybrid_w_dense": self.settings.w_dense,
+                        "hybrid_w_lex": self.settings.w_lex,
+                        "encoder_model": self.model_name,
+                        "reranker_model": self.ce_settings.model_name,
+
                     }
 
                 await self.redis.set(result_key, json.dumps(payload, ensure_ascii=False), ttl=self.queue.ticket_ttl)
@@ -204,12 +237,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
     async def _os_candidates(self, query: str, k: int) -> list[dict[str, tp.Any]]:
         os_adapter = self.os_adapter
-        fields = ["question", "analysis", "answer"]
         body = {
             "query": {
                 "multi_match": {
                     "query": query,
-                    "fields": fields,
+                    "fields": os_adapter.config.search_fields,
                     "operator": os_adapter.config.operator,
                     "fuzziness": os_adapter.config.fuzziness,
                 }
@@ -219,20 +251,25 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         hits = await asyncio.to_thread(os_adapter.search, body, k)
 
         out: list[dict[str, tp.Any]] = []
+        output_fields = os_adapter.config.output_fields
+        
         for h in hits:
             src = h.get("_source", {})
             raw = float(h.get("_score", 0.0))  # сырое значение от OpenSearch
-            out.append(
-                {
-                    "ext_id": src.get("ext_id", h.get("_id")),
-                    "question": src.get("question", ""),
-                    "analysis": src.get("analysis", ""),
-                    "answer": src.get("answer", ""),
-                    "score_lex_raw": raw,  # сохраняем «как есть»
-                    "score_lex": raw,  # пока сырое — нормализуем ниже
-                    "source": "opensearch",
-                }
-            )
+            
+            result_item = {
+                "score_lex_raw": raw,  # сохраняем «как есть»
+                "score_lex": raw,      # пока сырое — нормализуем ниже
+                "_source": "opensearch",
+            }
+            
+            for field in output_fields:
+                result_item[field] = src.get(field, "")
+            
+            # if "ext_id" in output_fields and not result_item["ext_id"]:
+            #     result_item["ext_id"] = h.get("_id", "")
+                
+            out.append(result_item)
 
         # нормализация в рамках одного запроса: s = raw / top
         if out:
@@ -251,19 +288,21 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         rows = await asyncio.to_thread(self.bm25.search, query, k)
 
         out: list[dict[str, tp.Any]] = []
+        output_fields = self.bm25.config.output_fields
+        
         for r in rows:
             raw = float(r.get("score_bm25", 0.0))
-            out.append(
-                {
-                    "ext_id": r.get("ext_id"),
-                    "question": r.get("question", ""),
-                    "analysis": r.get("analysis", ""),
-                    "answer": r.get("answer", ""),
-                    "score_lex_raw": raw,  # сырое значение
-                    "score_lex": raw,  # нормализуем ниже
-                    "source": "bm25",
-                }
-            )
+            
+            result_item = {
+                "score_lex_raw": raw,  # сырое значение
+                "score_lex": raw,      # нормализуем ниже
+                "_source": "bm25",
+            }
+            
+            for field in output_fields:
+                result_item[field] = r.get(field, "")
+                
+            out.append(result_item)
 
         if out:
             top = max(x["score_lex"] for x in out) or 0.0
@@ -277,13 +316,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         return out
 
     def _merge_candidates(
-            self,
-            dense: list[dict[str, tp.Any]],
-            lex: list[dict[str, tp.Any]],
+        self,
+        dense: list[dict[str, tp.Any]],
+        lex: list[dict[str, tp.Any]],
     ) -> list[dict[str, tp.Any]]:
         import math
-
-        FIELDS = self.merge_fields
 
         def ffloat(v: tp.Any) -> float:
             """Безопасный float: ошибки/NaN/inf -> 0.0."""
@@ -293,62 +330,63 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             except (TypeError, ValueError):
                 return 0.0
 
-        by_id: dict[str, dict[str, tp.Any]] = {}
+        merged_dict: dict[str, dict[str, tp.Any]] = {}
+        merge_key = self.settings.merge_by_field
 
         # 1) база из dense
         for d in dense:
-            ext_id = d.get("ext_id")
-            if not ext_id:
+            key_value = d.get(merge_key)
+            if not key_value:
+                self.logger.warning("Отсутствует ключ для слияния")
                 continue
-            x = by_id.setdefault(
-                ext_id,
+            x = merged_dict.setdefault(
+                key_value,
                 {
-                    "ext_id": ext_id,
-                    "question": "",
-                    "analysis": "",
-                    "answer": "",
-                    "score_dense": 0.0,
-                    "score_lex": 0.0,
+                    merge_key: key_value,
+                    **{field: "" for field in self.settings.merge_fields},
+                    **{score_field: 0.0 for score_field in ["score_dense", "score_lex"]},
                     "sources": set(),
                 },
             )
+            
             # дозаполняем тексты
-            for fld in FIELDS:
+            for fld in self.settings.merge_fields:
                 if not x.get(fld) and d.get(fld):
                     x[fld] = d[fld]
+            
             # агрегируем dense-скор (если вдруг встретится дубль)
             x["score_dense"] = max(ffloat(x.get("score_dense", 0.0)), ffloat(d.get("score_dense", 0.0)))
             x["sources"].add("dense")
 
         # 2) добавляем лексические кандидаты
         for l in lex:  # noqa: E741
-            ext_id = l.get("ext_id")
-            if not ext_id:
+            key_value = l.get(merge_key)
+            if not key_value:
+                self.logger.warning("Отсутствует ключ для слияния")
                 continue
-            x = by_id.setdefault(
-                ext_id,
+            x = merged_dict.setdefault(
+                key_value,
                 {
-                    "ext_id": ext_id,
-                    "question": "",
-                    "analysis": "",
-                    "answer": "",
-                    "score_dense": 0.0,
-                    "score_lex": 0.0,
+                    merge_key: key_value,
+                    **{field: "" for field in self.settings.merge_fields},
+                    **{score_field: 0.0 for score_field in ["score_dense", "score_lex"]},
                     "sources": set(),
                 },
             )
+            
             # дозаполняем тексты
-            for fld in FIELDS:
+            for fld in self.settings.merge_fields:
                 if not x.get(fld) and l.get(fld):
                     x[fld] = l[fld]
+            
             # агрегируем лучший лексический скор
             x["score_lex"] = max(ffloat(x.get("score_lex", 0.0)), ffloat(l.get("score_lex", 0.0)))
             # фиксация источника лексики
-            x["sources"].add(l.get("source", "lex"))
+            x["sources"].add(l.get("_source", "lex"))
 
-        # 3) привод типов: числа -> float, sources -> list (детерминированный порядок)
+        # 3) приводим типы: числа -> float, sources -> list (детерминированный порядок)
         out: list[dict[str, tp.Any]] = []
-        for x in by_id.values():
+        for x in merged_dict.values():
             x["score_dense"] = ffloat(x.get("score_dense", 0.0))
             x["score_lex"] = ffloat(x.get("score_lex", 0.0))
             if isinstance(x.get("sources"), set):

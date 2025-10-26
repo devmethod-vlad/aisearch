@@ -67,10 +67,10 @@
     MILVUS_QUERY_TIMEOUT=30
     MILVUS_METRIC_TYPE=IP
     MILVUS_COLLECTION_NAME=kb_default
-    MILVUS_DATA_SEARCHFIELDS=question
     MILVUS_RECREATE_COLLECTION=false
     MILVUS_VECTOR_FIELD=embedding
     MILVUS_ID_FIELD=pk
+    MILVUS_SEARCH_FIELDS=question
     MILVUS_OUTPUT_FIELDS=ext_id,question,analysis,answer
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
@@ -103,8 +103,8 @@
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
-    HYBRID_MERGE_TOP_K=20
-    HYBRID_MERGE_FIELDS=question,analysis,answer
+    HYBRID_MERGE_BY_FIELD=ext_id
+    HYBRID_OUTPUT_FIELDS=ext_id,question,analysis,answer
     HYBRID_DENSE_ABS_MIN=0.25
     HYBRID_DENSE_REL_MIN=0.6
     HYBRID_LEX_REL_MIN=0.5
@@ -124,8 +124,8 @@
     OS_VERIFY_CERTS=false
     OS_USER=
     OS_PASSWORD=
-    # OS_QUERY_PROFILE=fast
-    # OS_QUERY_FIELDS=question,analysis,answer
+    OS_SEARCH_FIELDS=question,analysis,answer
+    OS_OUTPUT_FIELDS=ext_id,question,analysis,answer
     OS_OPERATOR=or
     OS_MIN_SHOULD_MATCH=1
     OS_FUZZINESS=0
@@ -134,6 +134,8 @@
     OS_BULK_CHUNK_SIZE=1000
     OS_RECREATE_INDEX=true
     OS_SCHEMA_PATH=app/config/os_index.json
+    OS_VOLUME_HOST_PATH=./volumes/opensearch-data
+    OS_VOLUME_CONTR_PATH=/usr/share/opensearch/data
     
     NLTK_DATA_HOST_PATH=E:/nltk    # выкачка ресурсов через python -m nltk.downloader -d путь_к_папке punkt stopwords punkt_tab
     NLTK_DATA_CONTR_PATH=/srv/nltk_data
@@ -142,7 +144,8 @@
     # === BM25 (Whoosh) ===
     BM25_INDEX_PATH_HOST=C:/Users/omka/models/1
     BM25_INDEX_PATH=/usr/src/bm25index
-    BM25_SCHEMA_FIELDS=question,analysis,answer
+    BM25_SCHEMA_FIELDS=ext_id,question,analysis,answer
+    BM25_OUTPUT_FIELDS=ext_id,question,analysis,answer
     BM25_RECREATE_INDEX=false
 
     REDIS_HOSTNAME=redis

@@ -78,3 +78,24 @@ services:
       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+
+  aisearch-os-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    container_name: aisearch-os-dashboards
+    environment:
+      OPENSEARCH_HOSTS: '["http://aisearch-opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
+    ports:
+      - "5601:5601"
+    depends_on:
+      aisearch-opensearch:
+        condition: service_healthy
+
+  attu:
+    image: zilliz/attu:v2.5.0
+    container_name: aisearch-attu
+    ports:
+      - 8010:3000
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy

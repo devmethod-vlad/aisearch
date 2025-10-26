@@ -1,5 +1,6 @@
 import json
 import time
+import typing as tp
 
 import pandas as pd
 from opensearchpy import (
@@ -33,7 +34,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
 
 
 
-    def build_index(self, data: pd.DataFrame) -> None:
+    def build_index(self, data: dict[str, tp.Any]) -> None:
         """Построение индекса"""
         self.logger.info("Построение индекса OS ...")
         self._ensure_os_index(recreate=self.config.recreate_index)
@@ -60,7 +61,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
             )
             self.client.indices.refresh(index=self.config.index_name)
 
-    def _os_bulk_index(self, data: pd.DataFrame, chunk_size: int = 1000) -> None:
+    def _os_bulk_index(self, data: list[dict[str, tp.Any]], chunk_size: int = 1000) -> None:
         chunk_size = chunk_size or self.os_schema.bulk_chunk_size
         idx_name = self.os_schema.index_name
         id_field = self.os_schema.id_field
@@ -69,7 +70,7 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         props = (self.os_schema.mappings.get("properties") or {})
         type_of: dict[str, str] = {k: (v.get("type") or "") for k, v in props.items()}
 
-        def coerce(field: str, value):
+        def coerce(field: str, value: tp.Any) -> tp.Any:
             t = type_of.get(field, "")
             if value is None:
                 return None
@@ -81,20 +82,15 @@ class OpenSearchAdapter(IOpenSearchAdapter):
                 if t in ("float", "half_float", "scaled_float", "double"):
                     return float(value)
                 if t == "boolean":
-
                     return bool(value)
-
                 return value
             except Exception:
-
                 return None
 
-        cols = list(data.columns)
-
-        def gen_actions():
-            for _, row in data.iterrows():
-
-                doc = {c: coerce(c, row[c]) for c in cols if c in type_of}
+        def gen_actions() -> tp.Iterator[dict[str, tp.Any]]:
+            for row in data:
+                # Создаем документ, конвертируя значения в соответствии с типами
+                doc = {field: coerce(field, value) for field, value in row.items() if field in type_of}
 
                 _id = doc.get(id_field)
                 yield {

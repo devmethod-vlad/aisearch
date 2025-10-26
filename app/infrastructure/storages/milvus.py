@@ -290,7 +290,7 @@ class MilvusDatabase(IVectorDatabase):
             metadata: list[dict[str, tp.Any]] | None = None,
     ) -> None:
         """Индексация документов в vector_db."""
-        self.logger.info("ПРОИСХОДИТ ИНДЕКСАЦИЯ")
+        self.logger.info("Происходит индексация документов в Milvus ...")
         embeddings = model.encode(documents, normalize_embeddings=True)
         embeddings = np.vstack([l2_normalize(e) for e in embeddings])
 

@@ -19,6 +19,7 @@ class BM25Adapter(IBM25Adapter):
 
     def __init__(self, settings: Settings, logger: AISearchLogger):
         bm25_init_start = time.perf_counter()
+        self.config = settings.bm25
         self.index_path = settings.bm25.index_path
         self.schema_fields = settings.bm25.schema_fields
         self._ix: BM25Okapi | None = None
@@ -30,7 +31,7 @@ class BM25Adapter(IBM25Adapter):
 
     @staticmethod
     def build_index(
-        data: pd.DataFrame, index_path: str, texts: list[str], logger: AISearchLogger
+        data: list[dict[str, tp.Any]], index_path: str, texts: list[str], logger: AISearchLogger
     ) -> None:
         """Построение индекса"""
         logger.info("Построение индекса BM25 ...")
@@ -47,7 +48,8 @@ class BM25Adapter(IBM25Adapter):
                 f,
             )
 
-        data.to_parquet(f"{index_path}/rows.parquet")
+        df = pd.DataFrame(data)
+        df.to_parquet(f"{index_path}/rows.parquet")
         logger.info("Индекс BM25 построен")
 
     def ensure_index(self) -> None:
@@ -61,16 +63,15 @@ class BM25Adapter(IBM25Adapter):
             self.logger.warning(f"Не удалось подгрузить индексы из {self.index_path}, error: {e}")
 
     def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
-        """Возвращает список кандидатов:
-        [{"ext_id","question","analysis","answer","score_bm25","source":"bm25"}, ...]
-        """
+        """Возвращает список кандидатов"""
         scores = self._ix.get_scores(query)
         idxs = np.argsort(scores)[::-1][:top_k]
         hits = [(int(i), float(scores[i])) for i in idxs]
         results: list[dict[str, tp.Any]] = []
         seen = set()
 
-        data_columns = list(self._data.columns)
+        # data_columns = list(self._data.columns)
+        data_columns = self.schema_fields
 
         for ridx, s in hits:
             if ridx in seen:
@@ -83,7 +84,7 @@ class BM25Adapter(IBM25Adapter):
                 result_item[col] = str(r.get(col, "") if hasattr(r, "get") else getattr(r, col, ""))
 
             result_item["score_bm25"] = float(s)  # type: ignore
-            result_item["source"] = "bm25"
+            result_item["_source"] = "bm25"
 
             results.append(result_item)
 

@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import uuid
 
-from app.api.v1.dto.responses.hybrid_search import HybridSearchResponse, SearchResult, SearchMetrics
+from app.api.v1.dto.responses.hybrid_search import (
+    HybridSearchResponse, 
+    # SearchResult, 
+    SearchMetrics 
+)
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
@@ -96,11 +100,12 @@ class HybridSearchService(IHybridSearchService):
         if raw:
             result_data = json.loads(raw)
             if "results" in result_data:
-                results = [SearchResult(**r) for r in result_data["results"]]
+                # results = [SearchResult(**r) for r in result_data["results"]]
+                results = result_data["results"]
             if "answer" in result_data:
                 answer = result_data["answer"]
             if "metrics" in result_data:
-                metrics = SearchMetrics(**result_data["metrics"])
+                metrics = result_data["metrics"]
         return TaskResponse(
             task_id=ticket_id,
             url=f"/taskmanager/{ticket_id}",
