@@ -74,7 +74,7 @@
     MILVUS_OUTPUT_FIELDS=ext_id,question,analysis,answer
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
-    MILVUS_MODEL=USER-bge-m3
+    MILVUS_MODEL_NAME=USER-bge-m3
     MILVUS_SCHEMA_PATH=app/config/conf.json
 
     # === Очередь LLM (для отложенной генерации, если нет слота семафора) ===
@@ -175,7 +175,7 @@
     RERANKER_DTYPE=fp16
     RERANKER_SCORE_MOD=sigmoid
     RERANKER_SOFTMAX_TEMP=0.7
-    RERANKER_MODEL=cross-encoder-russian-msmarco
+    RERANKER_MODEL_NAME=cross-encoder-russian-msmarco
     RERANKER_PAIRS_FIELDS=question,analysis,answer
 
     # === vLLM (локальный OpenAI-совместимый сервер) ===
@@ -199,6 +199,15 @@
 
     TIMEIT_LOG_METRICS_ENABLED=true  # включить логгирование времени
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
+    
+    EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
+    EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
+    EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
+    EXTRACT_VIO_BASE_FILE_NAME="Вопросы_и_ответы.xlsx"
+    EXTRACT_CRON_UPDATE_HOURS=12
+    EXTRACT_LOGS_CONTR_PATH=/usr/src/logs/updater
+    EXTRACT_LOGS_HOST_PATH=./logs/updater
+    EXTRACT_BASE_HARVESTER_API_URL="https://edu.emias.ru/edu-rest-api/test/data-harvester"
 
 ## Сборка образов
 Для ускорения процесса работы разделим сборку на три образа:
@@ -273,3 +282,8 @@
     pre-commit uninstall
 
 Если правило форматирования в конкретном случае выполнить невозможно - сбоку от "проблемной строки" оставляем коммент вида '# noqa: <Код правила>'
+
+## Установка всех зависимостей в единое окружение при использовании Poetry (Windows, cmd)
+```
+for /d %d in (buildeps\*) do (poetry lock -C "%d" && poetry install -C "%d" --no-root)
+```

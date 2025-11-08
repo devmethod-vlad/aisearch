@@ -6,6 +6,7 @@ import typing as tp
 
 from sentence_transformers import SentenceTransformer
 
+# from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
@@ -108,6 +109,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
                     cache_parse_start = time.perf_counter()
+                    # results = [SearchResult(**x) for x in json.loads(cached)]
                     results = [json.loads(cached)]
                     metrics["cache_parse_time"] = self._metrics_logger("🕒 Cache parse", cache_parse_start)
                 else:
@@ -145,51 +147,32 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
 
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
-
-                    print("dense results: ", dense)
-                    print("len(dense) : ", len(dense))
-                    print("lex results: ", lex)
-                    print("len(lex): ", len(lex))
-
                     dense = self._precut_dense(dense)
                     lex = self._precut_lex(lex)
-
-                    print("dense after precut results: ", dense)
-                    print("len(dense) : ", len(dense))
-                    print("lex after precut  results: ", lex)
-                    print("len(lex): ", len(lex))
-
                     for d in dense:
                         d["score_dense"] = self._dense_to_unit(d.get("score_dense", 0.0))
 
-                    print("dense after norm results: ", dense)
-
                     merged = self._merge_candidates(dense, lex)
-
-                    print("merged: ", merged)
-                    print("len(merged) : ", len(merged))
 
                     # ---- Cross-encoder ----
                     if self.switches.use_reranker and merged:
                         start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
-                        print("pairs: ", pairs)
                         # scores = await asyncio.to_thread(self.ce.rank, pairs)
                         scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
                         scores = self.ce.ce_postprocess(scores)
                         metrics["cross_encoder_time"] = self._metrics_logger("🕒 Cross-encoder rank", start)
                         for m, s in zip(merged, scores):
                             m["score_ce"] = float(s)
-                        print("merged after rerank: ", merged)
 
-                    results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
-
-                    print("results (_score_and_slice): ", results)
-                    print("len(results) : ", len(results))
+                    _results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
+                    # results = [SearchResult(**r) for r in _results]
+                    results = _results
 
                     if self.use_cache:
                         await self.redis.set(
                             cache_key,
+                            # json.dumps([r.model_dump() for r in results]),
                             results,
                             ttl=self.settings.cache_ttl,
                         )
@@ -199,6 +182,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 # ---- Payload ----
                 payload = {
+                    # "results": [r.model_dump() for r in results]
                     "results": results
                 }
                 if self.response_metrics_enabled:

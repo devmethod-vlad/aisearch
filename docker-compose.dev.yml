@@ -38,6 +38,44 @@ services:
               count: all
               capabilities: [ gpu ]
 
+  aisearch-updater:
+    build:
+      context: .
+      dockerfile: Dockerfile_search_main
+      args:
+        https_proxy: ${HTTPS_PROXY}
+        http_proxy: ${HTTP_PROXY}
+        HTTPS_PROXY: ${HTTPS_PROXY}
+        HTTP_PROXY: ${HTTP_PROXY}
+        IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
+        IMAGE_NAME: ${IMAGE_NAME}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+        CUDA_IMAGE: ${CUDA_IMAGE}
+        CUDA_WHEEL: ${CUDA_WHEEL}
+    command:
+      ["python3", "-m", "app.scheduler"]
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+      - ${EXTRACT_LOGS_HOST_PATH}/:${EXTRACT_LOGS_CONTR_PATH}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
   aisearch-redis:
     container_name: aisearch-redis
     image: redis:7.4.2

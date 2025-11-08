@@ -31,6 +31,7 @@ dependencies = [
     "rank-bm25>=0.2.2,<0.3",
     "slowapi>=0.1.9,<0.2",
     "psutil (>=7.1.1,<8.0.0)",
+    "apscheduler>=3.1.5"
 ]
 
 [dependency-groups]

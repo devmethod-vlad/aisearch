@@ -354,3 +354,160 @@ class MilvusDatabase(IVectorDatabase):
         """Закрытие соединения с клиентом."""
         if hasattr(self, "client"):
             await self.client.close()
+
+    async def fetch_existing(
+            self, collection_name: str, output_fields: list[str] | None = None
+    ) -> list[dict]:
+        """Получить все данные из коллекции пакетами по 8_192, корректно для auto_id и строковых полей"""
+        try:
+            if collection_name not in self.__collections_loaded:
+                await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+                self.__collections_loaded.add(collection_name)
+
+            output_fields = output_fields or self.config.output_fields
+            row_count = int((await self.client.get_collection_stats(collection_name))["row_count"])
+            results = []
+
+            batch_size = 8_192
+            last_pk = -1
+
+            while True:
+                # Берём пакет записей по автоинкрементному PK
+                filter_expr = f"pk > {last_pk}"
+                batch_res = await self.client.query(
+                    collection_name=collection_name,
+                    filter=filter_expr,
+                    output_fields=output_fields,
+                    limit=batch_size,
+                    timeout=self.config.query_timeout
+                )
+                if not batch_res:
+                    break
+                results.extend(batch_res)
+                last_pk = max(r["pk"] for r in batch_res)
+
+            self.logger.info(f"Получено {len(results)} записей из Milvus")
+            return results
+
+        except Exception as e:
+            self.logger.error(f"Не удалось получить записи мильвус {collection_name}: {e}")
+            return []
+
+    async def upsert_vectors(
+            self,
+            collection_name: str,
+            vectors: list[list[float]],
+            metadata: list[dict[str, tp.Any]] | None = None,
+            batch_size: int = 512,
+    ):
+        """Вставка/обновление векторов и метаданных (upsert по ext_id)."""
+        if not metadata:
+            metadata = [{} for _ in vectors]
+        elif len(metadata) != len(vectors):
+            raise ValueError("Количество векторов не совпадает с количеством метаданных")
+
+        # 1) Получаем существующие записи по ext_id
+        existing = await self.fetch_existing(collection_name, output_fields=["ext_id", "pk"])
+        ext_id_to_pk = {r["ext_id"]: r["pk"] for r in existing}
+
+        # 2) Определяем pk, которые нужно удалить (существующие)
+        pk_to_delete = [ext_id_to_pk[m["ext_id"]] for m in metadata if m["ext_id"] in ext_id_to_pk]
+        if pk_to_delete:
+            # В Milvus нет delete_by_ids для auto_id, используем filter
+            filter_expr = "pk in [" + ",".join(map(str, pk_to_delete)) + "]"
+            await self.client.delete(collection_name=collection_name, filter=filter_expr)
+            await self.client.flush(collection_name)
+
+        # 3) Подготовка данных
+        fields, _, _ = load_schema_and_indexes_from_json(self.config.schema_path)
+        f_by_name = {f.name: f for f in fields}
+        vec_field = self.config.vector_field
+        dim = getattr(f_by_name[vec_field], "dim", f_by_name[vec_field].params.get("dim"))
+
+        def _normalize(vec):
+            if len(vec) != dim:
+                raise ValueError(f"Ожидалась размерность {dim}, получили {len(vec)}")
+            return [float(x) for x in vec]
+
+        def _coerce(name, value):
+            f = f_by_name.get(name)
+            if f is None or value is None:
+                return None, True
+            if f.dtype == DataType.VARCHAR:
+                s = str(value)
+                if getattr(f, "max_length", None):
+                    s = s[: f.max_length]
+                return s, False
+            if f.dtype in (DataType.INT64, DataType.INT32, DataType.INT16, DataType.INT8):
+                return int(value), False
+            if f.dtype in (DataType.FLOAT, DataType.DOUBLE):
+                return float(value), False
+            if f.dtype == DataType.BOOL:
+                return bool(value), False
+            return value, False
+
+        # 4) Вставка батчами
+        total = len(vectors)
+        num_batches = (total + batch_size - 1) // batch_size
+        self.logger.info(f"Upsert {total} векторов/метаданных, батч {batch_size}, всего {num_batches} батчей")
+
+        for i in range(num_batches):
+            start = i * batch_size
+            end = min(start + batch_size, total)
+            vec_batch = [_normalize(v) for v in vectors[start:end]]
+            meta_batch = metadata[start:end]
+
+            data = []
+            for vec, row in zip(vec_batch, meta_batch):
+                item = {vec_field: vec}
+                for k, v in row.items():
+                    val, drop = _coerce(k, v)
+                    if not drop:
+                        item[k] = val
+                data.append(item)
+
+            await self.client.insert(collection_name=collection_name, data=data, timeout=self.config.query_timeout)
+            self.logger.info(f"Загружено {i + 1}/{num_batches} батчей")
+
+        await self.client.flush(collection_name, timeout=self.config.query_timeout)
+        self.logger.info("Upsert завершен ✅")
+
+    async def delete_vectors(
+            self,
+            collection_name: str,
+            ext_ids: list[str] | None = None,
+            filter_expr: str | None = None,
+    ) -> None:
+        """
+        Удаляет записи из коллекции Milvus.
+
+        Можно удалить:
+          - по списку ext_id (list[str])
+          - или по произвольному фильтру (filter_expr)
+        """
+
+        if not ext_ids and not filter_expr:
+            raise ValueError("Нужно передать либо ext_ids, либо filter_expr")
+
+        # Загружаем коллекцию, если ещё не загружена
+        if collection_name not in self.__collections_loaded:
+            await self.client.load_collection(collection_name, timeout=self.config.query_timeout)
+            self.__collections_loaded.add(collection_name)
+
+        # Если передан список ext_id — формируем выражение фильтра
+        if ext_ids:
+            quoted_ids = ",".join(f"'{x}'" for x in ext_ids)
+            filter_expr = f"ext_id in [{quoted_ids}]"
+
+        self.logger.info(f"🧹 Удаление записей из {collection_name} по фильтру: {filter_expr}")
+
+        try:
+            await self.client.delete(
+                collection_name=collection_name,
+                filter=filter_expr,
+                timeout=self.config.query_timeout,
+            )
+            await self.client.flush(collection_name, timeout=self.config.query_timeout)
+            self.logger.info(f"✅ Удаление завершено ({collection_name})")
+        except Exception as e:
+            self.logger.error(f"Ошибка при удалении из {collection_name}: {e}")

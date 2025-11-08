@@ -5,12 +5,13 @@ from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.common.storages.redis import RedisStorage
 from app.infrastructure.adapters.bm25 import BM25Adapter
 from app.infrastructure.adapters.cross_encoder import CrossEncoderAdapter
+from app.infrastructure.adapters.edu import EduAdapter
 from app.infrastructure.adapters.interfaces import (
     IBM25Adapter,
     ICrossEncoderAdapter,
     IOpenSearchAdapter,
     IRedisSemaphore,
-    IVLLMAdapter,
+    IVLLMAdapter, IEduAdapter,
 )
 from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.adapters.llm_adapter import VLLMAdapter
@@ -22,9 +23,10 @@ from app.infrastructure.storages.milvus import MilvusDatabase
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 from app.services.interfaces import (
-    IHybridSearchOrchestrator,
+    IHybridSearchOrchestrator, IUpdaterService,
 
 )
+from app.services.updater import UpdaterService
 
 from app.settings.config import (
     AppSettings,
@@ -50,6 +52,8 @@ class ApplicationProvider(Provider):
     cross_encoder_adapter = provide(
         CrossEncoderAdapter, scope=Scope.APP, provides=ICrossEncoderAdapter
     )
+    edu_adapter = provide(EduAdapter, scope=Scope.APP, provides=IEduAdapter)
+    update_service = provide(UpdaterService, scope=Scope.APP, provides=IUpdaterService)
     milvus_database = provide(MilvusDatabase, scope=Scope.APP, provides=IVectorDatabase)
 
     hybrid_search_orchestrator = provide(

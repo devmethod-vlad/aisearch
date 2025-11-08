@@ -1,4 +1,5 @@
 import abc
+import io
 import typing as tp
 
 import numpy as np
@@ -63,6 +64,23 @@ class IOpenSearchAdapter(abc.ABC):
     def search(self, body: dict, size: int) -> list[dict]:
         """Поиск opensearch"""
 
+    @abc.abstractmethod
+    def fetch_existing(self, size: int = 10000) -> list[dict[str, tp.Any]]:
+        """Получить все документы из индекса OpenSearch"""
+
+    @abc.abstractmethod
+    def upsert(self, data: list[dict[str, tp.Any]]) -> None:
+        """Upsert документов в OpenSearch (обновляет или добавляет)"""
+
+    @abc.abstractmethod
+    def delete(self, ext_ids: list[str]) -> None:
+        """
+        Удаляет документы из OpenSearch:
+          - либо по списку id (ids)
+          - либо по произвольному query (dict)
+        """
+
+
 
 class IBM25Adapter(abc.ABC):
     """Адаптер кросс-энкодера"""
@@ -102,3 +120,24 @@ class ICrossEncoderAdapter(abc.ABC):
         - "sigmoid" (по умолчанию): независимая вероятность для каждого (query, doc)
         - "softmax": распределение по кандидатовому списку (с температурой)
         """
+
+
+class IEduAdapter(abc.ABC):
+    """Адаптер edu"""
+
+    @abc.abstractmethod
+    async def get_attachment_id_from_edu(self, filename: str, page_id: str | None = None) -> str:
+        """Получение id вложения на EDU"""
+
+    @abc.abstractmethod
+    async def download_vio_base_file(self) -> io.BytesIO:
+        """Загрузить ВИО"""
+
+    @abc.abstractmethod
+    async def download_kb_base_file(self) -> io.BytesIO:
+        """Загрузить КБ"""
+
+    @abc.abstractmethod
+    async def provoke_harvest_to_edu(self,  harvest_type: str) -> bool:
+        """Обновление файлов на edu"""
+

@@ -131,6 +131,20 @@
       "description": "For user flag", 
       "max_length": 65535, 
       "nullable": true 
+    },
+    {
+      "name": "jira",
+      "dtype": "VARCHAR",
+      "description": "Jira link",
+      "max_length": 65535,
+      "nullable": true
+    },
+    {
+      "name": "modified_at",
+      "dtype": "VARCHAR",
+      "description": "Last update date",
+      "max_length": 65535,
+      "nullable": true
     }
   ],
   "indexes": [

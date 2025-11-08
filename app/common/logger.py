@@ -13,6 +13,7 @@ class LoggerType(Enum):
     CELERY = "celery"
     TEST = "test"
     QUEUE = "queue"
+    UPDATER = "updater"
 
 
 class AISearchLogger(logging.Logger):
@@ -77,6 +78,8 @@ class AISearchLogger(logging.Logger):
             return settings.celery.logs_contr_path if env == "docker" else settings.celery.logs_host_path
         elif self.logger_type == LoggerType.QUEUE:
             return settings.celery.logs_queue_contr_path if env == "docker" else settings.celery.logs_queue_host_path
+        elif self.logger_type == LoggerType.UPDATER:
+            return settings.extract_edu.logs_contr_path if env == "docker" else settings.extract_edu.logs_host_path
 
 
         raise TypeError(f"Неизвестный тип логгера ({self.logger_type})")

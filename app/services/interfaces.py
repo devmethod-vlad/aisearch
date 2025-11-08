@@ -51,3 +51,14 @@ class IHybridSearchOrchestrator(abc.ABC):
     @abc.abstractmethod
     async def warmup(self) -> bool:
         """Прогрев"""
+
+class IUpdaterService(abc.ABC):
+    """Обновляет бд из внешних источников"""
+
+    @abc.abstractmethod
+    async def update_vio_base(self):
+        """Обновление данных из VIO"""
+
+    @abc.abstractmethod
+    async def update_kb_base(self):
+        """Обновление данных из KB"""

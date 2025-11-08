@@ -105,6 +105,10 @@ services:
     networks:
       - default
 
+  aisearch-updater:
+    networks:
+      - default
+
 #  aisearch-vllm:
 #    networks:
 #      - default

@@ -83,3 +83,30 @@ class IVectorDatabase(abc.ABC):
     @abc.abstractmethod
     async def close(self) -> None:
         """Закрытие соединения с клиентом."""
+
+    @abc.abstractmethod
+    async def fetch_existing(
+            self,
+            collection_name: str,
+            output_fields: list[str] | None = None,
+    ) -> list[dict[str, tp.Any]]:
+        """Извлечь существующие данные"""
+
+    @abc.abstractmethod
+    async def upsert_vectors(
+            self,
+            collection_name: str,
+            vectors: list[list[float]],
+            metadata: list[dict[str, tp.Any]] | None = None,
+            batch_size: int = 512,
+    ):
+        """Вставка/обновление векторов и метаданных (upsert по ext_id)."""
+
+    @abc.abstractmethod
+    async def delete_vectors(
+            self,
+            collection_name: str,
+            ext_ids: list[str] | None = None,
+            filter_expr: str | None = None,
+    ) -> None:
+        """Удаление записей"""

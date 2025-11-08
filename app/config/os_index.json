@@ -58,7 +58,9 @@
       "answer_md": { "type": "text", "analyzer": "ru_mixed" },
       "answer":    { "type": "text", "analyzer": "ru_mixed" },
       
-      "for_user":  { "type": "keyword" }
+      "for_user":  { "type": "keyword" },
+      "jira": { "type": "keyword" },
+      "modified_at": {"type": "keyword"}
     }
   }
 }

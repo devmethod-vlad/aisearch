@@ -275,6 +275,25 @@ class CelerySettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="celery_")
 
 
+class ExtractEduSettings(EnvBaseSettings):
+    """Извлечение файлов с edu"""
+
+    edu_emias_url: str
+    base_harvester_api_url: str
+    edu_emias_token: str
+    edu_emias_attachments_page_id: str
+    knowledge_base_file_name: str
+    vio_base_file_name: str
+    cron_update_hours: int
+    logs_host_path: str
+    logs_contr_path: str
+
+
+
+    model_config = SettingsConfigDict(env_prefix="extract_")
+
+
+
 class SearchMetricsEnabled(EnvBaseSettings):
     """Вывод временных метрик поиска"""
     log_metrics_enabled: bool = True
@@ -302,6 +321,8 @@ class Settings(EnvBaseSettings):
     switches: SearchSwitches = SearchSwitches()
     slowapi: SlowAPISettings = SlowAPISettings()
     search_metrics: SearchMetricsEnabled = SearchMetricsEnabled()
+    extract_edu: ExtractEduSettings = ExtractEduSettings()
+
 
     @model_validator(mode="after")
     def _fill_vllm_model(self) -> Self:
