@@ -16,8 +16,8 @@
 
     CUDA_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu22.04
     CUDA_WHEEL=cu128
-    HTTPS_PROXY=''
-    HTTP_PROXY=''
+    HTTPS_PROXY_ENV=''
+    HTTP_PROXY_ENV=''
     IMAGE_NAME_BASE=cuda-python-uv-base:latest
     IMAGE_NAME_DEPS=aisearch-deps-base:latest
     IMAGE_NAME=aisearch-app-dev:latest
@@ -201,6 +201,7 @@
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
     
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
+    EXTRACT_EDU_EMIAS_TOKEN=""
     EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
     EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
     EXTRACT_VIO_BASE_FILE_NAME="Вопросы_и_ответы.xlsx"

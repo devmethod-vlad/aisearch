@@ -4,10 +4,10 @@ services:
       context: .
       dockerfile: Dockerfile_api
       args:
-        https_proxy: ${HTTPS_PROXY}
-        http_proxy: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        HTTP_PROXY: ${HTTP_PROXY}
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
     healthcheck:
       disable: true
     networks:
@@ -30,10 +30,10 @@ services:
       context: .
       dockerfile: Dockerfile_queue
       args:
-        https_proxy: ${HTTPS_PROXY}
-        http_proxy: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        HTTP_PROXY: ${HTTP_PROXY}
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
     networks:
       - default
       - service-network
@@ -43,16 +43,12 @@ services:
       context: .
       dockerfile: Dockerfile_search_main
       args:
-        https_proxy: ${HTTPS_PROXY}
-        http_proxy: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        HTTP_PROXY: ${HTTP_PROXY}
-        IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
-        IMAGE_NAME: ${IMAGE_NAME}
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
         IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
         REGISTRY: ${REGISTRY}
-        CUDA_IMAGE: ${CUDA_IMAGE}
-        CUDA_WHEEL: ${CUDA_WHEEL}
     networks:
       - default
       - service-network
@@ -105,9 +101,9 @@ services:
     networks:
       - default
 
-  aisearch-updater:
-    networks:
-      - default
+#  aisearch-updater:
+#    networks:
+#      - default
 
 #  aisearch-vllm:
 #    networks:

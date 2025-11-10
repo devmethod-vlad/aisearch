@@ -4,10 +4,14 @@ services:
       context: .
       dockerfile: Dockerfile_api
       args:
-          https_proxy: ${HTTPS_PROXY}
-          http_proxy: ${HTTP_PROXY}
-          HTTPS_PROXY: ${HTTPS_PROXY}
-          HTTP_PROXY: ${HTTP_PROXY}
+          https_proxy: ${HTTPS_PROXY_ENV}
+          http_proxy: ${HTTP_PROXY_ENV}
+          HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+          HTTP_PROXY: ${HTTP_PROXY_ENV}
+    volumes:
+      - ./:/backend
+      - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
+      - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
     networks:
       - default
       - service-network
@@ -17,10 +21,10 @@ services:
       context: .
       dockerfile: Dockerfile_queue
       args:
-        https_proxy: ${HTTPS_PROXY}
-        http_proxy: ${HTTP_PROXY}
-        HTTPS_PROXY: ${HTTPS_PROXY}
-        HTTP_PROXY: ${HTTP_PROXY}
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
     networks:
       - default
       - service-network
@@ -30,16 +34,34 @@ services:
       context: .
       dockerfile: Dockerfile_search_main
       args:
-         https_proxy: ${HTTPS_PROXY}
-         http_proxy: ${HTTP_PROXY}
-         HTTPS_PROXY: ${HTTPS_PROXY}
-         HTTP_PROXY: ${HTTP_PROXY}
-         IMAGE_NAME_BASE: ${IMAGE_NAME_BASE}
-         IMAGE_NAME: ${IMAGE_NAME}
+         https_proxy: ${HTTPS_PROXY_ENV}
+         http_proxy: ${HTTP_PROXY_ENV}
+         HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+         HTTP_PROXY: ${HTTP_PROXY_ENV}
          IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
          REGISTRY: ${REGISTRY}
-         CUDA_IMAGE: ${CUDA_IMAGE}
-         CUDA_WHEEL: ${CUDA_WHEEL}
+    networks:
+      - default
+      - service-network
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+  aisearch-updater:
+    build:
+      context: .
+      dockerfile: Dockerfile_search_main
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
     networks:
       - default
       - service-network

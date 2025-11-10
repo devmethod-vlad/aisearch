@@ -39,9 +39,9 @@ async def load_collection_and_index(
     df = pd.read_parquet(f"{collection_name}.parquet")
     df = df[
         df[column_for_vector].notna()
-        & (df[column_for_vector].astype(str).str.len() > 0)
-        & (df["answer"].astype(str).str.len() > 2)
-        & (df["for_user"] == "Да")
+        # & (df[column_for_vector].astype(str).str.len() > 0)
+        # & (df["answer"].astype(str).str.len() > 2)
+        # & (df["for_user"] == "Да")
     ].reset_index(drop=True)
 
     documents = df[column_for_vector].astype(str).tolist()
