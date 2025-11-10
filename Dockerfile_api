@@ -8,3 +8,5 @@ COPY buildeps/api/pyproject.toml ./buildeps/api/pyproject.toml
 
 RUN uv pip compile buildeps/api/pyproject.toml -o requirements.lock \
  && uv pip sync --system requirements.lock
+
+COPY app/ ./app/

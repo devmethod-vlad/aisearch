@@ -29,7 +29,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self,
         queue: ILLMQueue,
         sem: IRedisSemaphore,
-        vector_db: IVectorDatabase,
+        vector_db:  IVectorDatabase,
         bm25: IBM25Adapter,
         ce: ICrossEncoderAdapter,
         os_adapter: IOpenSearchAdapter,
@@ -147,13 +147,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
 
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
+                    self.logger.info(f"🧠 Milvus sample: {dense[0]}")
+                    self.logger.info(f"🧠 OS sample: {lex[0]}")
+
                     dense = self._precut_dense(dense)
+                    self.logger.info(f"🧠 Milvus sample 2: {dense[0]}")
+                    self.logger.info(f"🧠 OS sample 2: {lex[0]}")
                     lex = self._precut_lex(lex)
                     for d in dense:
                         d["score_dense"] = self._dense_to_unit(d.get("score_dense", 0.0))
 
                     merged = self._merge_candidates(dense, lex)
-
+                    self.logger.info(f"🧠 MERGESD sample: {merged[0]}")
                     # ---- Cross-encoder ----
                     if self.switches.use_reranker and merged:
                         start = time.perf_counter()
@@ -166,6 +171,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             m["score_ce"] = float(s)
 
                     _results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
+                    self.logger.info(f"🧠 _RESULTS sample: {_results[0]}")
                     # results = [SearchResult(**r) for r in _results]
                     results = _results
 

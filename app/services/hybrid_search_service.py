@@ -56,7 +56,7 @@ class HybridSearchService(IHybridSearchService):
             raise TooManyRequestsException("LLM queue overflow, try later") from e
         return TaskResponse(
             task_id=ticket_id,
-            url=f"/taskmanager/{ticket_id}",
+            url=f"/hybrid-search/info/{ticket_id}",
             status="queued",
             extra={"position": pos},
         )
@@ -84,7 +84,7 @@ class HybridSearchService(IHybridSearchService):
             raise TooManyRequestsException("LLM queue overflow, try later") from e
         return TaskResponse(
             task_id=ticket_id,
-            url=f"/taskmanager/{ticket_id}",
+            url=f"/hybrid-search/info/{ticket_id}",
             status="queued",
             extra={"position": pos},
         )
@@ -99,6 +99,7 @@ class HybridSearchService(IHybridSearchService):
         metrics = None
         if raw:
             result_data = json.loads(raw)
+
             if "results" in result_data:
                 # results = [SearchResult(**r) for r in result_data["results"]]
                 results = result_data["results"]
@@ -108,7 +109,7 @@ class HybridSearchService(IHybridSearchService):
                 metrics = result_data["metrics"]
         return TaskResponse(
             task_id=ticket_id,
-            url=f"/taskmanager/{ticket_id}",
+            url=f"/hybrid-search/info/{ticket_id}",
             status=status.get("state"),
             extra={"position": status.get("approx_position")},
             info=HybridSearchResponse(results=results or [], metrics=metrics),

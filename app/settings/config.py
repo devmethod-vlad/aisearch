@@ -25,6 +25,7 @@ class AppSettings(EnvBaseSettings):
     access_key: str
     prefix: str = ""
     use_cache: bool = True
+    log_level: str = "INFO"
     logs_host_path: str
     logs_contr_path: str
     normalize_query: bool
@@ -123,7 +124,7 @@ class HybridSearchSettings(EnvBaseSettings):
     version: str = "v1"
     collection_name: str = "kb_default"
     merge_by_field: str = "ext_id"
-    merge_fields: str | list[str] = "ext_id,question,analysis,answer"
+    merge_fields: str | list[str] =    "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
 
     @model_validator(mode="after")
     def assemble_hybrid_settings(self) -> tp.Self:
@@ -182,7 +183,7 @@ class OpenSearchSettings(EnvBaseSettings):
     user: str | None = None
     password: str | None = None
     search_fields: str | list[str] = "question,analysis,answer"
-    output_fields: str | list[str] = "ext_id,question,analysis,answer"
+    output_fields: str | list[str] = "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
     operator: str = "or"
     min_should_match: int = 1
     fuzziness: int = 0

@@ -26,8 +26,11 @@ services:
         restart: true
     command: >
       sh -c "
-        exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker --access-logfile ${GUNICORN_LOGS_CONTR_PATH}/access.log --error-logfile ${GUNICORN_LOGS_CONTR_PATH}/error.log
+        exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker -c app/config/gunicorn_conf.py
       "
+#      sh -c "
+#              exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker --access-logfile ${GUNICORN_LOGS_CONTR_PATH}/access.log --error-logfile ${GUNICORN_LOGS_CONTR_PATH}/error.log
+#            "
 
   aisearch-queue-worker:
     container_name: aisearch-queue-worker

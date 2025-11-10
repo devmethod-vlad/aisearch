@@ -30,6 +30,7 @@
     APP_DEBUG_PORT=5678
     APP_WORKERS_NUM=2
     APP_ACCESS_KEY=123
+    APP_LOG_LEVEL=info
     APP_PREFIX=
     APP_LOGS_HOST_PATH=./logs/app
     APP_LOGS_CONTR_PATH=/usr/src/logs/app
@@ -71,7 +72,7 @@
     MILVUS_VECTOR_FIELD=embedding
     MILVUS_ID_FIELD=pk
     MILVUS_SEARCH_FIELDS=question
-    MILVUS_OUTPUT_FIELDS=ext_id,question,analysis,answer
+    MILVUS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
     MILVUS_MODEL_NAME=USER-bge-m3
@@ -104,7 +105,8 @@
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
     HYBRID_MERGE_BY_FIELD=ext_id
-    HYBRID_OUTPUT_FIELDS=ext_id,question,analysis,answer
+    HYBRID_MERGE_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
+    HYBRID_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
     HYBRID_DENSE_ABS_MIN=0.25
     HYBRID_DENSE_REL_MIN=0.6
     HYBRID_LEX_REL_MIN=0.5
@@ -125,7 +127,7 @@
     OS_USER=
     OS_PASSWORD=
     OS_SEARCH_FIELDS=question,analysis,answer
-    OS_OUTPUT_FIELDS=ext_id,question,analysis,answer
+    OS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
     OS_OPERATOR=or
     OS_MIN_SHOULD_MATCH=1
     OS_FUZZINESS=0
@@ -201,7 +203,6 @@
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
     
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
-    EXTRACT_EDU_EMIAS_TOKEN=""
     EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
     EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
     EXTRACT_VIO_BASE_FILE_NAME="Вопросы_и_ответы.xlsx"
