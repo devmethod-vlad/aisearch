@@ -28,6 +28,7 @@ class AppSettings(EnvBaseSettings):
     log_level: str = "INFO"
     logs_host_path: str
     logs_contr_path: str
+    gunicorn_logs_contr_path: str
     normalize_query: bool
 
     model_config = SettingsConfigDict(env_prefix="app_")

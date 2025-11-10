@@ -9,6 +9,7 @@ services:
     volumes:
       - ./:/backend
       - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
+      - ${APP_GUNICORN_LOGS_HOST_PATH}/:${APP_GUNICORN_LOGS_CONTR_PATH}/
     ports:
       - ${APP_PORT}:${APP_PORT}
     healthcheck:
@@ -16,7 +17,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
-
     depends_on:
       aisearch-milvus:
         condition: service_healthy
@@ -28,9 +28,6 @@ services:
       sh -c "
         exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker -c app/config/gunicorn_conf.py
       "
-#      sh -c "
-#              exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker --access-logfile ${GUNICORN_LOGS_CONTR_PATH}/access.log --error-logfile ${GUNICORN_LOGS_CONTR_PATH}/error.log
-#            "
 
   aisearch-queue-worker:
     container_name: aisearch-queue-worker
@@ -168,23 +165,23 @@ services:
       timeout: 5s
       retries: 30
 
-#  aisearch-updater:
-#     container_name: aisearch-updater
-#     command:
-#       ["python3", "-m", "app.scheduler"]
-#     volumes:
-#       - ./:/backend
-#       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-#       - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
-#       - ${EXTRACT_LOGS_HOST_PATH}/:${EXTRACT_LOGS_CONTR_PATH}/
-#       - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
-#     env_file:
-#       - .env
-#     environment:
-#       - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
-#       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
-#       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
-#       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+  aisearch-updater:
+     container_name: aisearch-updater
+     command:
+       ["python3", "-m", "app.scheduler"]
+     volumes:
+       - ./:/backend
+       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+       - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+       - ${EXTRACT_LOGS_HOST_PATH}/:${EXTRACT_LOGS_CONTR_PATH}/
+       - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+     env_file:
+       - .env
+     environment:
+       - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+       - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+       - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+       - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
 
 #  aisearch-vllm:
 #    image: vllm/vllm-openai:latest

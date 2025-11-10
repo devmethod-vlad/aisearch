@@ -66,30 +66,30 @@ async def main():
             "max_instances": 1,  # Только один экземпляр задачи одновременно
         }
     )
-    # scheduler.add_job(
-    #     update_vio,
-    #     "cron",
-    #     hour=settings.extract_edu.cron_update_hours,
-    #     args=(service,),
-    #     id="update_vio",
-    #     replace_existing=True,
-    # )
-    # scheduler.add_job(
-    #     update_kb,
-    #     "cron",
-    #     hour=settings.extract_edu.cron_update_hours,
-    #     args=(service,),
-    #     id="update_kb",
-    #     replace_existing=True,
-    # )
     scheduler.add_job(
         update_vio,
-        "interval",
-        seconds=60,
+        "cron",
+        hour=settings.extract_edu.cron_update_hours,
         args=(service,),
         id="update_vio",
         replace_existing=True,
     )
+    scheduler.add_job(
+        update_kb,
+        "cron",
+        hour=settings.extract_edu.cron_update_hours,
+        args=(service,),
+        id="update_kb",
+        replace_existing=True,
+    )
+    # scheduler.add_job(
+    #     update_vio,
+    #     "interval",
+    #     seconds=60,
+    #     args=(service,),
+    #     id="update_vio",
+    #     replace_existing=True,
+    # )
     # scheduler.add_job(
     #     update_kb,
     #     "interval",

@@ -34,13 +34,12 @@
     APP_PREFIX=
     APP_LOGS_HOST_PATH=./logs/app
     APP_LOGS_CONTR_PATH=/usr/src/logs/app
+    APP_GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
+    APP_GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn
     APP_USE_CACHE=false  # Использовать ли кэширование
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
     APP_NORMALIZE_QUERY=true # Нормализовать ли запрос
-
-    GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
-    GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn
 
     ETCD_AUTO_COMPACTION_MODE=revision # periodic
     ETCD_AUTO_COMPACTION_RETENTION=1000 # time, like "1h"
@@ -203,6 +202,7 @@
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
     
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
+    # EXTRACT_EDU_EMIAS_TOKEN=""
     EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
     EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
     EXTRACT_VIO_BASE_FILE_NAME="Вопросы_и_ответы.xlsx"

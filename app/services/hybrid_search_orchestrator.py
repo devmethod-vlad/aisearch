@@ -6,7 +6,6 @@ import typing as tp
 
 from sentence_transformers import SentenceTransformer
 
-# from app.api.v1.dto.responses.hybrid_search import SearchResult
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import (
@@ -145,25 +144,19 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         metrics["lexical_search_time"] = self._metrics_logger("🕒 Lexical search", start)
                         return res
 
-
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
-                    self.logger.info(f"🧠 Milvus sample: {dense[0]}")
-                    self.logger.info(f"🧠 OS sample: {lex[0]}")
 
                     dense = self._precut_dense(dense)
-                    self.logger.info(f"🧠 Milvus sample 2: {dense[0]}")
-                    self.logger.info(f"🧠 OS sample 2: {lex[0]}")
                     lex = self._precut_lex(lex)
                     for d in dense:
                         d["score_dense"] = self._dense_to_unit(d.get("score_dense", 0.0))
 
                     merged = self._merge_candidates(dense, lex)
-                    self.logger.info(f"🧠 MERGESD sample: {merged[0]}")
+
                     # ---- Cross-encoder ----
                     if self.switches.use_reranker and merged:
                         start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
-                        # scores = await asyncio.to_thread(self.ce.rank, pairs)
                         scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
                         scores = self.ce.ce_postprocess(scores)
                         metrics["cross_encoder_time"] = self._metrics_logger("🕒 Cross-encoder rank", start)
@@ -171,14 +164,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             m["score_ce"] = float(s)
 
                     _results = self._score_and_slice(merged, top_k, use_ce=self.switches.use_reranker)
-                    self.logger.info(f"🧠 _RESULTS sample: {_results[0]}")
-                    # results = [SearchResult(**r) for r in _results]
                     results = _results
 
                     if self.use_cache:
                         await self.redis.set(
                             cache_key,
-                            # json.dumps([r.model_dump() for r in results]),
                             results,
                             ttl=self.settings.cache_ttl,
                         )
@@ -188,15 +178,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 # ---- Payload ----
                 payload = {
-                    # "results": [r.model_dump() for r in results]
                     "results": results
                 }
                 if self.response_metrics_enabled:
                     payload["metrics"] = {
                         "embedding_time": metrics.get("embedding_time"),
                         "vector_search_time": metrics.get("vector_search_time"),
-                        "opensearch_time": metrics.get("lexical_search_time") if self.switches.use_opensearch else None,
-                        "bm25_time": metrics.get("lexical_search_time") if self.switches.use_bm25 else None,
+                        "lexical_search_time": metrics.get("lexical_search_time"),
                         "cross_encoder_time": metrics.get("cross_encoder_time"),
                         "total_time": metrics.get("total_search_time"),
                         "reranker_enabled": self.switches.use_reranker,

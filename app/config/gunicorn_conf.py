@@ -11,7 +11,7 @@ dictConfig({
     "version": 1,
     "disable_existing_loggers": False,
     "formatters": {
-        "default": {"format": "%(asctime)s [%(process)d] [%(levelname)s] %(name)s: %(message)s"},
+        "default": {"format": "%(asctime)s [%(process)d] [%(levelname)s]: %(message)s"},
         "access": {"format": "%(asctime)s [%(process)d] %(message)s"},
     },
     "handlers": {

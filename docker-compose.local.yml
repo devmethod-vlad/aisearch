@@ -13,17 +13,10 @@ services:
     networks:
       - default
       - service-network
-    command: >
-      sh -c "
-        exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
-      "
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [ gpu ]
+#    command: >
+#      sh -c "
+#        exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
+#      "
 
   aisearch-queue-worker:
     build:
@@ -104,6 +97,14 @@ services:
 #  aisearch-updater:
 #    networks:
 #      - default
+#      - service-network
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [ gpu ]
 
 #  aisearch-vllm:
 #    networks:

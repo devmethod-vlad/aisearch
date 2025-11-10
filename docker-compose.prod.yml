@@ -8,10 +8,6 @@ services:
           http_proxy: ${HTTP_PROXY_ENV}
           HTTPS_PROXY: ${HTTPS_PROXY_ENV}
           HTTP_PROXY: ${HTTP_PROXY_ENV}
-    volumes:
-      - ./:/backend
-      - ${APP_LOGS_HOST_PATH}/:${APP_LOGS_CONTR_PATH}/
-      - ${GUNICORN_LOGS_HOST_PATH}/:${GUNICORN_LOGS_CONTR_PATH}/
     networks:
       - default
       - service-network
