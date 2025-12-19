@@ -3,11 +3,7 @@ import io
 import typing as tp
 
 import numpy as np
-import pandas as pd
 import torch
-
-
-from app.common.logger import AISearchLogger
 
 
 class IRedisSemaphore(abc.ABC):
@@ -41,10 +37,10 @@ class IVLLMAdapter(abc.ABC):
         system_prompt: str,
         user_prompt: str,
         *,
-        max_tokens: tp.Optional[int] = None,
-        temperature: tp.Optional[float] = None,
-        top_p: tp.Optional[float] = None,
-        extra: tp.Optional[dict[str, tp.Any]] = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        extra: dict[str, tp.Any] | None = None,
     ) -> str:
         """Метод запроса к LLM"""
 
@@ -74,48 +70,80 @@ class IOpenSearchAdapter(abc.ABC):
 
     @abc.abstractmethod
     def delete(self, ext_ids: list[str]) -> None:
+        """Удаляет документы из OpenSearch по ext_id"""
+
+    @abc.abstractmethod
+    def ensure_index_not_empty(self) -> None:
+        """Проверяет, что индекс существует и содержит хотя бы 1 документ."""
+
+    @abc.abstractmethod
+    def ids_exist_by_source_field(
+        self,
+        incoming_ext_ids: tp.Iterable[tp.Any],
+        source: str = None,
+        field: str = "ext_id",
+        batch_size: int = 2000,
+        scan_page: int = 1000,
+        scroll_keepalive: str = "5m",
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Вернёт три списка (строки):
+        - found_incoming: входящие ext_id, найденные в индексе по _source[field]
+        - missing_incoming: входящие ext_id, которых нет в индексе
+        - extra_in_store: ext_id, которые есть в индексе, но их нет во входящих
         """
-        Удаляет документы из OpenSearch:
-          - либо по списку id (ids)
-          - либо по произвольному query (dict)
+
+    @abc.abstractmethod
+    def delete_by_ext_ids(
+        self,
+        ext_ids: list[str],
+        field: str = "ext_id",
+        batch_size: int = 2000,
+        scan_page: int = 1000,
+        scroll_keepalive: str = "5m",
+    ) -> int:
+        """Удаляет документы по строковому полю _source[field].
+        Возвращает количество удалённых документов.
         """
 
-
-
-class IBM25Adapter(abc.ABC):
-    """Адаптер кросс-энкодера"""
-
-    @staticmethod
     @abc.abstractmethod
-    def build_index(
-        data: list[dict[str, tp.Any]], index_path: str, texts: list[str], logger: AISearchLogger
-    ) -> None:
-        """Построение индекса"""
-
-    @abc.abstractmethod
-    def ensure_index(self) -> None:
-        """Подгрузка индекса"""
-
-    @abc.abstractmethod
-    def search(self, query: str, top_k: int = 50) -> list[dict[str, tp.Any]]:
-        """Возвращает список кандидатов"""
+    def diff_modified_by_ext_ids(
+        self,
+        incoming_modified: dict[str, str],
+        *,
+        field: str = "ext_id",
+        modified_field: str = "modified_at",
+        batch_size: int = 2000,
+        scan_page: int = 1000,
+        scroll_keepalive: str = "5m",
+    ) -> list[str]:
+        """Вернёт список ext_id, у которых modified_at в индексе OpenSearch отличается
+        от входящего значения.
+        """
 
 
 class ICrossEncoderAdapter(abc.ABC):
     """Адаптер кросс-энкодера"""
 
     @abc.abstractmethod
-    def rank(self, pairs: list[tuple[str, str]]) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
+    def rank(
+        self, pairs: list[tuple[str, str]]
+    ) -> list[torch.Tensor] | np.ndarray | torch.Tensor:
         """Реранжирование"""
 
     @abc.abstractmethod
-    def rank_fast(self, pairs: list[tuple[str, str]], device: str = "cuda", batch_size: int = 128,  max_length: int = 192, dtype: str = "fp16") -> list[float]:
+    def rank_fast(
+        self,
+        pairs: list[tuple[str, str]],
+        device: str = "cuda",
+        batch_size: int = 128,
+        max_length: int = 192,
+        dtype: str = "fp16",
+    ) -> list[float]:
         """Быстрое ранкирование"""
 
     @abc.abstractmethod
     def ce_postprocess(self, logits: list[float]) -> list[float]:
-        """
-        Преобразует логиты CE в интерпретируемые очки.
+        """Преобразует логиты CE в интерпретируемые очки.
         Режим управляется self.settings.ce_score_mode:
         - "sigmoid" (по умолчанию): независимая вероятность для каждого (query, doc)
         - "softmax": распределение по кандидатовому списку (с температурой)
@@ -126,7 +154,9 @@ class IEduAdapter(abc.ABC):
     """Адаптер edu"""
 
     @abc.abstractmethod
-    async def get_attachment_id_from_edu(self, filename: str, page_id: str | None = None) -> str:
+    async def get_attachment_id_from_edu(
+        self, filename: str, page_id: str | None = None
+    ) -> str:
         """Получение id вложения на EDU"""
 
     @abc.abstractmethod
@@ -138,6 +168,5 @@ class IEduAdapter(abc.ABC):
         """Загрузить КБ"""
 
     @abc.abstractmethod
-    async def provoke_harvest_to_edu(self,  harvest_type: str) -> bool:
+    async def provoke_harvest_to_edu(self, harvest_type: str) -> bool:
         """Обновление файлов на edu"""
-

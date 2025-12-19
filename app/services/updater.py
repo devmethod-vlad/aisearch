@@ -1,23 +1,22 @@
-import gc
-import importlib
 import io
-import typing as tp
-import numpy as np
+
 import pandas as pd
-import torch
-import unicodedata
 from sentence_transformers import SentenceTransformer
 
 from app.common.logger import AISearchLogger
-from app.infrastructure.adapters.interfaces import IOpenSearchAdapter, IEduAdapter
+from app.infrastructure.adapters.interfaces import IEduAdapter, IOpenSearchAdapter
 from app.infrastructure.storages.interfaces import IVectorDatabase
-from app.infrastructure.utils.nlp import l2_normalize
+from app.infrastructure.utils.prepare_dataframe import (
+    dedup_by_question_any,
+    prepare_dataframe,
+    rename_dataframe
+)
+from app.infrastructure.utils.universal import cleanup_resources
 from app.services.interfaces import IUpdaterService
 from app.settings.config import Settings
 
 
 class UpdaterService(IUpdaterService):
-
     FIELD_MAPPING = {
         "Источник": "source",
         "ID": "ext_id",
@@ -36,18 +35,24 @@ class UpdaterService(IUpdaterService):
         "Ответ (clean)": "answer",
         "Для пользователя": "for_user",
         "Jira": "jira",
-        "Обновлено": "modified_at"
+        "Обновлено": "modified_at",
     }
 
-    def __init__(self, settings: Settings, logger: AISearchLogger,
-                 edu: IEduAdapter, milvus: IVectorDatabase, os: IOpenSearchAdapter):
+    def __init__(
+        self,
+        settings: Settings,
+        logger: AISearchLogger,
+        edu: IEduAdapter,
+        milvus: IVectorDatabase,
+        os: IOpenSearchAdapter,
+    ):
         self.settings = settings
         self.logger = logger
         self.edu = edu
         self.milvus = milvus
-        self.os_adapter = os
+        self.os = os
         self.collection_name = settings.milvus.collection_name
-        self.model: tp.Optional[SentenceTransformer] = None
+        self.model: SentenceTransformer | None = None
 
     async def _load_excel_from_edu(self, file_type: str) -> pd.DataFrame:
         if file_type == "vio":
@@ -60,163 +65,224 @@ class UpdaterService(IUpdaterService):
         self.logger.info(f"Файл '{file_type}' загружен, {len(df)} строк")
         return df
 
-    def _prepare_metadata(self, df: pd.DataFrame, file_type: str) -> pd.DataFrame:
+    def _prepare_metadata(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
-        df.rename(columns=self.FIELD_MAPPING, inplace=True)
-        df["ext_id"] = df["ext_id"].astype(str)
-        df = df[df["answer"].astype(str).str.len() > 2]
-        df["row_idx"] = range(len(df))
-        if file_type == "vio":
-            df["space"] = df["space"].astype(str).str.strip()
 
-            df = df[
-                df["space"].notna()
-                & (df["space"].str.strip() != "")
-                & (df["space"].str.lower() != "не распределено")
-                ]
+        _, _, df_prepared = prepare_dataframe(
+            df=df,
+            logger=self.logger
+        )
 
-        return df
+        return df_prepared
 
-    async def _fetch_existing_data(self) -> dict[str, dict]:
-        """Собираем все существующие записи из Milvus и OS по ext_id"""
-        all_fields = list(UpdaterService.FIELD_MAPPING.values()) + [self.settings.milvus.vector_field, "row_idx"]
-        milvus_raw = await self.milvus.fetch_existing(self.collection_name, output_fields=all_fields)
-        milvus_data = {str(r["ext_id"]): r for r in milvus_raw if r.get("ext_id")}
-        os_raw = self.os_adapter.fetch_existing()
-        os_data = {str(r["ext_id"]): r for r in os_raw if r.get("ext_id")}
-        combined = milvus_data.copy()
-        combined.update(os_data)  # OS перезаписывает пересечения
-        return combined
-
-    def normalize_text(self, val):
-        """Приводим значение к строке, убираем невидимые символы, нормализуем переносы строк."""
-        if val is None:
-            return None
-        if isinstance(val, float) and np.isnan(val):
-            return None
-        if isinstance(val, str) and (val.strip() == "" or val.strip().lower() == "nan"):
-            return None
-
-        s = str(val).strip()
-        s = s.replace("\xa0", " ")  # неразрывные пробелы
-        s = s.replace("\r\n", "\n").replace("\r", "\n")  # нормализуем CRLF и CR
-        # Заменяем подряд идущие переносы на один
-        s = "\n".join([line.strip() for line in s.splitlines() if line.strip() != ""])
-        s = unicodedata.normalize("NFKC", s)
-        return s
-
-    def _diff_records(self, incoming_df: pd.DataFrame, existing_data: dict[str, dict]) -> pd.DataFrame:
-        """
-        Возвращает только новые или изменённые строки.
-        Если есть поле modified_at — сравниваем только его.
-        Если его нет или пустое — сравниваем все поля.
-        """
-        to_update = []
-
-        for _, row in incoming_df.iterrows():
-            ext_id = str(row["ext_id"])
-            existing_row = existing_data.get(ext_id)
-
-
-            if not existing_row:
-                to_update.append(row)
-                continue
-
-            val_incoming_mod = str(row.get("modified_at") or "").strip()
-            val_existing_mod = str(existing_row.get("modified_at") or "").strip()
-
-            # Если есть modified_at, сравниваем только его
-            if val_incoming_mod and val_existing_mod:
-                if val_incoming_mod != val_existing_mod:
-                    self.logger.warning(f"🕓 Изменено {ext_id}: modified_at {val_existing_mod!r} -> {val_incoming_mod!r}")
-                    to_update.append(row)
-                continue
-
-            # Если modified_at нет — сравниваем всё остальное
-            for col in incoming_df.columns:
-                if col in ("row_idx", "modified_at"):
-                    continue
-
-                val_incoming = self.normalize_text(row[col])
-                val_existing = self.normalize_text(existing_row.get(col))
-
-                if val_incoming != val_existing:
-                    self.logger.warning(f"✏️ Изменено {ext_id}: {col} — {val_existing!r} -> {val_incoming!r}")
-                    to_update.append(row)
-                    break
-
-        return pd.DataFrame(to_update)
-
-    async def _update_collection_from_df(self, df: pd.DataFrame):
-        self.logger.info("🔍 Сравнение с текущими данными ...")
-        existing_data = await self._fetch_existing_data()
-
-        # --- 1️⃣ Сравнение и определение изменённых ---
-        df_to_update = self._diff_records(df, existing_data)
-
-        # --- 2️⃣ Определяем, какие ext_id больше не актуальны ---
-        incoming_ids = set(df["ext_id"].astype(str))
-        existing_ids = set(existing_data.keys())
-        to_delete_ids = existing_ids - incoming_ids
-
-        # --- 3️⃣ Логирование ---
-        if to_delete_ids:
-            self.logger.warning(f"🗑 Найдено {len(to_delete_ids)} устаревших записей для удаления")
-        if df_to_update.empty and not to_delete_ids:
-            self.logger.info("✅ Нет новых, изменённых или удалённых записей — обновление не требуется.")
+    async def _update_collection_from_df(
+        self, df: pd.DataFrame, target_source: str
+    ) -> None:
+        if df.empty:
             return
 
-        # --- 4️⃣ Upsert новых/изменённых ---
-        if not df_to_update.empty:
-            if self.model is None:
-                self.model = SentenceTransformer(self.settings.milvus.model_name)
+        current_source = target_source
+        self.logger.info(f"🔄 Обновление данных для источника: {current_source}")
 
-            documents = df_to_update[self.settings.milvus.search_fields].astype(str).tolist()
-            metadata = df_to_update.to_dict(orient="records")
+        incoming_ext_ids = df["ext_id"].astype(str).tolist()
 
-            self.logger.info(f"⬆️ Добавляем/обновляем {len(df_to_update)} записей ...")
+        # Используем отдельные проверки для каждой БД
+        os_found, os_missing, os_extra = self.os.ids_exist_by_source_field(
+            incoming_ext_ids, source=current_source
+        )
 
-            embeddings = self.model.encode(documents, normalize_embeddings=True)
-            embeddings = np.vstack([l2_normalize(e) for e in embeddings])
-            await self.milvus.upsert_vectors(self.collection_name, embeddings.tolist(), metadata)
+        mil_found, mil_missing, mil_extra = await self.milvus.find_existing_ext_ids(
+            self.collection_name,
+            incoming_ext_ids,
+            source_field="source",
+            source=current_source,
+        )
 
-            self.os_adapter.upsert(metadata)
+        incoming_set = set(incoming_ext_ids)
 
-        # --- 5️⃣ Удаление устаревших ---
-        if to_delete_ids:
+        # Для OpenSearch
+        to_delete_os = list(set(os_extra))
+        if to_delete_os:
+            self.logger.warning(
+                f"🗑 OpenSearch: удаляем {len(to_delete_os)} документов..."
+            )
             try:
-                await self.milvus.delete_vectors(self.collection_name, list(to_delete_ids))
-                self.os_adapter.delete(list(to_delete_ids))
-                self.logger.info(f"✅ Удалено {len(to_delete_ids)} записей из Milvus и OpenSearch")
+                deleted_count = self.os.delete_by_ext_ids(to_delete_os)
+                self.logger.info(f"✅ OpenSearch: удалено {deleted_count}, ext_ids: {to_delete_os}")
             except Exception as e:
-                self.logger.error(f"❌ Ошибка при удалении устаревших записей: {e}")
+                self.logger.error(f"❌ Ошибка удаления в OpenSearch: {e}")
 
-        self.logger.info("✅ Обновление базы завершено")
+        # Для Milvus
+        to_delete_milvus = list(set(mil_extra))
+        if to_delete_milvus:
+            self.logger.warning(
+                f"🗑 Milvus: удаляем {len(to_delete_milvus)} entities..."
+            )
+            try:
+                deleted_count = await self.milvus.delete_by_ext_ids(
+                    self.collection_name, to_delete_milvus
+                )
+                self.logger.info(f"✅ Milvus: удалено ~{deleted_count}, ext_ids: {to_delete_milvus}")
+            except Exception as e:
+                self.logger.error(f"❌ Ошибка удаления в Milvus: {e}")
 
-    async def update_vio_base(self):
-        harvest = await self.edu.provoke_harvest_to_edu(harvest_type="vio")
-        if harvest:
-            df = await self._load_excel_from_edu("vio")
-            df = self._prepare_metadata(df, "vio")
-            await self._update_collection_from_df(df)
-            await self.cleanup_resources()
+        # Определяем, что нужно обновлять/добавлять в OpenSearch
+        new_in_os = set(os_missing)
+        self.logger.info(
+            f"🗑 OpenSearch: новых документов: {len(new_in_os)}, ext_ids: {new_in_os}"
+        )
+        update_candidates_os = set(os_found)
+
+        # Для найденных в OS проверяем modified_at
+        if update_candidates_os:
+            self.logger.info("🔎 OpenSearch: сравниваем modified_at...")
+            try:
+                # Создаем карту modified_at только для найденных записей
+                incoming_modified_map_os = {
+                    str(r["ext_id"]): (
+                        ""
+                        if r.get("modified_at") is None
+                        else str(r.get("modified_at")).strip()
+                    )
+                    for r in df[
+                        df["ext_id"].astype(str).isin(update_candidates_os)
+                    ].to_dict(orient="records")
+                }
+
+                os_different = set(
+                    self.os.diff_modified_by_ext_ids(incoming_modified_map_os)
+                )
+            except Exception as e:
+                self.logger.error(f"⚠️ Ошибка при diff_modified_by_ext_ids в OS: {e}")
+                os_different = set()
         else:
-            self.logger.error("Не удалось загрузить данные на edu")
+            os_different = set()
+        self.logger.info(
+            f"🗑 OpenSearch: измененных документов: {len(os_different)}, ext_ids: {os_different}"
+        )
+        # Для Milvus аналогично
+        new_in_milvus = set(mil_missing)
+        self.logger.info(
+            f"🗑 Milvus: новых документов: {len(new_in_milvus)}, ext_ids: {new_in_milvus}"
+        )
+        update_candidates_mil = set(mil_found)
 
-    async def update_kb_base(self):
-        harvest = await self.edu.provoke_harvest_to_edu(harvest_type="kb")
-        if harvest:
-            df = await self._load_excel_from_edu("kb")
-            df = self._prepare_metadata(df, "kb")
-            await self._update_collection_from_df(df)
-            await self.cleanup_resources()
+        if update_candidates_mil:
+            self.logger.info("🔎 Milvus: сравниваем modified_at...")
+            try:
+                # Создаем карту modified_at только для найденных записей
+                incoming_modified_map_mil = {
+                    str(r["ext_id"]): (
+                        ""
+                        if r.get("modified_at") is None
+                        else str(r.get("modified_at")).strip()
+                    )
+                    for r in df[
+                        df["ext_id"].astype(str).isin(update_candidates_mil)
+                    ].to_dict(orient="records")
+                }
+
+                mil_different = set(
+                    await self.milvus.diff_modified_by_ext_ids(
+                        self.collection_name, incoming_modified_map_mil
+                    )
+                )
+            except Exception as e:
+                self.logger.error(f"⚠️ Ошибка при сравнении modified_at в Milvus: {e}")
+                mil_different = set()
         else:
-            self.logger.error("Не удалось загрузить данные на edu")
+            mil_different = set()
+        self.logger.info(
+            f"🗑 Milvus: измененных документов: {len(mil_different)}, ext_ids: {mil_different}"
+        )
+        # Определяем, что нужно создать/обновить в каждой БД отдельно
+        to_upsert_os = (new_in_os | os_different) & incoming_set
+        to_upsert_mil = (new_in_milvus | mil_different) & incoming_set
 
-    async def cleanup_resources(self):
-        self.logger.info("🧹 Очистка ресурсов ...")
-        importlib.invalidate_caches()
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-        self.logger.info("Ресурсы очищены ✅")
+        # Объединяем для удобства обработки (уникальные записи)
+        to_upsert_all = to_upsert_os | to_upsert_mil
+
+        if not to_upsert_all:
+            self.logger.info("✅ Нет новых или изменённых записей для upsert.")
+            return
+
+        df_to_upsert = df[df["ext_id"].astype(str).isin(to_upsert_all)].copy()
+        if df_to_upsert.empty:
+            return
+
+        if self.model is None:
+            self.model = SentenceTransformer(self.settings.milvus.model_name)
+
+        docs = df_to_upsert[self.settings.milvus.search_fields].astype(str).tolist()
+        metadata = df_to_upsert.to_dict(orient="records")
+
+        self.logger.info(f"⬆️ Подготавливаем upsert для {len(metadata)} записей...")
+
+        try:
+            embeddings = await self.milvus.get_embeddings(self.model, docs)
+        except Exception as e:
+            self.logger.error(f"❌ Ошибка генерации эмбеддингов: {e}")
+            raise
+
+        # Upsert в Milvus (только для записей, которые нужно обновить в Milvus)
+        mil_metadata = [m for m in metadata if str(m["ext_id"]) in to_upsert_mil]
+        if mil_metadata:
+            try:
+                mil_indices = [
+                    i
+                    for i, m in enumerate(metadata)
+                    if str(m["ext_id"]) in to_upsert_mil
+                ]
+                mil_embeddings = embeddings[mil_indices]
+
+                await self.milvus.upsert_vectors(
+                    self.collection_name, mil_embeddings.tolist(), mil_metadata
+                )
+                self.logger.info(
+                    f"✅ Milvus: upsert выполнен для {len(mil_metadata)} записей"
+                )
+            except Exception as e:
+                self.logger.error(f"❌ Milvus upsert failed: {e}")
+
+        # Upsert в OpenSearch (только для записей, которые нужно обновить в OS)
+        os_metadata = [m for m in metadata if str(m["ext_id"]) in to_upsert_os]
+        if os_metadata:
+            try:
+                self.os.upsert(os_metadata)
+                self.logger.info(
+                    f"✅ OpenSearch: upsert выполнен для {len(os_metadata)} записей"
+                )
+            except Exception as e:
+                self.logger.error(f"❌ OpenSearch upsert failed: {e}")
+
+        self.logger.info("✅ Обновление коллекции завершено")
+
+    async def update_vio_base(self) -> None:
+        df = await self._load_excel_from_edu("vio")
+        df = self._prepare_metadata(df)
+        await self._update_collection_from_df(df, target_source="ВиО")
+        cleanup_resources(self.logger)
+
+    async def update_kb_base(self) -> None:
+        df = await self._load_excel_from_edu("kb")
+        df = self._prepare_metadata(df)
+        await self._update_collection_from_df(df, target_source="ТП")
+        cleanup_resources(self.logger)
+
+    async def update_all(self) -> None:
+        df_kb = await self._load_excel_from_edu("kb")
+        df_kv = await self._load_excel_from_edu("vio")
+        df_combined = pd.concat([df_kb, df_kv])
+
+        df_renamed = rename_dataframe(df_combined)
+        df_renamed = df_renamed.drop_duplicates(subset=['ext_id'], keep="last")
+        df_deduped = dedup_by_question_any(df_renamed)
+        df_deduped = self._prepare_metadata(df_deduped)
+
+        df_kb = df_deduped[df_deduped["source"] == "ТП"].copy()
+        df_kv = df_deduped[df_deduped["source"] == "ВиО"].copy()
+
+        await self._update_collection_from_df(df_kb, target_source="ТП")
+        await self._update_collection_from_df(df_kv, target_source="ВиО")
+
+        cleanup_resources(self.logger)

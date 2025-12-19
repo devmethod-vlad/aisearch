@@ -1,0 +1,249 @@
+services:
+#  aisearch-app:
+#    container_name: aisearch-app
+#    env_file:
+#      - .env
+#    environment:
+#      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+#      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+#      - APP_LOGS_ACCESS_PATH=${LOGS_CONTR_DIR}/${LOGS_ACCESS_LOCATION}
+#      - APP_LOGS_PATH=${LOGS_CONTR_DIR}/${APP_LOGS_LOCATION}
+#    volumes:
+#      - ./:/backend
+#      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+#    ports:
+#      - ${APP_PORT}:${APP_PORT}
+#    healthcheck:
+#      test: ["CMD", "bash", "-c", "set -o pipefail; /backend/scripts/api_killer.sh $$APP_LOGS_PATH | tee /proc/1/fd/1"]
+#      interval: 30s
+#      timeout: 15s
+#      retries: 1
+#    depends_on:
+#      aisearch-milvus:
+#        condition: service_healthy
+#        restart: true
+#      aisearch-celery-worker:
+#        condition: service_healthy
+#        restart: true
+#      aisearch-opensearch:
+#        condition: service_started
+#        restart: true
+#      aisearch-queue-worker:
+#        condition: service_started
+#        restart: true
+#    command: >
+#      sh -c "
+#        /backend/scripts/wait_for_services.sh $$APP_LOGS_PATH &&
+#        exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker -c app/settings/gunicorn_conf.py
+#      "
+#
+#  aisearch-queue-worker:
+#    container_name: aisearch-queue-worker
+#    command: >
+#      sh -c "
+#        exec python3 -m app.infrastructure.queue_worker.worker -Q gpu-search
+#      "
+#    volumes:
+#      - ./:/backend
+#      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+#    env_file:
+#      - .env
+#    environment:
+#      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
+#      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
+#      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+#      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+#      - CELERY_LOGS_QUEUE_PATH=${LOGS_CONTR_DIR}/${CELERY_LOGS_QUEUE_LOCATION}
+#    depends_on:
+#      aisearch-milvus:
+#        condition: service_healthy
+#        restart: true
+#      aisearch-celery-worker:
+#        condition: service_healthy
+#        restart: true
+#
+#  aisearch-celery-worker:
+#    container_name: aisearch-celery-search-worker
+#    command: >
+#      sh -c "
+#        redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE --scan --pattern \"aisearch:health:$$WORKER_ID:celery-proc:*\" | xargs -r redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE del &&
+#        /backend/scripts/wait_for_services.sh $$CELERY_LOGS_PATH &&
+#        alembic upgrade head &&
+#        python3 pre_launch.py --load --logtype celery &&
+#        exec celery -A app.infrastructure.search_worker.worker:worker worker -Q gpu-search --concurrency ${CELERY_WORKERS_NUM}
+#      "
+#    volumes:
+#      - ./:/backend
+#      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+#      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+#      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+#      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+#    env_file:
+#      - .env
+#    environment:
+#      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+#      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+#      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+#      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+#      - WORKER_ID=search@celery-w1
+#      - CELERY_LOGS_PATH=${LOGS_CONTR_DIR}/${CELERY_LOGS_LOCATION}
+#
+#    depends_on:
+#      aisearch-milvus:
+#        condition: service_healthy
+#        restart: true
+#      aisearch-opensearch:
+#        condition: service_started
+#        restart: true
+#
+#    healthcheck:
+#      test: [
+#        "CMD", "bash", "-lc",
+#        "set -o pipefail; python3 -m app.infrastructure.search_worker.healthcheck 2>&1 | tee /proc/1/fd/1"
+#      ]
+#      interval: 5s
+#      timeout: 30s
+#      retries: 5
+#      start_period: 120s
+
+  aisearch-etcd:
+    container_name: aisearch-etcd
+    image: quay.io/coreos/etcd:v3.5.18
+    env_file:
+      - .env
+    volumes:
+      - ${ETCD_VOLUME_HOST_PATH}:${ETCD_VOLUME_CONTR_PATH}
+    command: etcd -advertise-client-urls=http://aisearch-etcd:${ETCD_PORT} -listen-client-urls http://0.0.0.0:${ETCD_PORT} --data-dir /etcd
+    environment:
+      - ETCDCTL_API=3
+      - ETCDCTL_ENDPOINTS=http://127.0.0.1:${ETCD_PORT}
+    healthcheck:
+        test: [ "CMD", "etcdctl", "endpoint", "health" ]
+        interval: 30s
+        timeout: 20s
+        retries: 3
+
+  aisearch-minio:
+    container_name: aisearch-minio
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    env_file:
+      - .env
+    ports:
+      - ${MINIO_WEB_UI_PORT}:${MINIO_WEB_UI_PORT}
+      - ${MINIO_PORT}:${MINIO_PORT}
+    volumes:
+      - ${MINIO_VOLUME_HOST_PATH}:${MINIO_VOLUME_CONTR_PATH}
+    command: minio server /minio_data --console-address :${MINIO_WEB_UI_PORT}
+    healthcheck:
+      test: curl -f ${MINIO_HOST}:${MINIO_PORT}/minio/health/live || exit 1
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  aisearch-milvus:
+    container_name: aisearch-milvus
+    image: milvusdb/milvus:v2.5.12
+    env_file:
+      - .env
+    command: [ "milvus", "run", "standalone" ]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: aisearch-etcd:${ETCD_PORT}
+      MINIO_ADDRESS: aisearch-minio:${MINIO_PORT}
+    volumes:
+      - ${MILVUS_VOLUME_HOST_PATH}:${MILVUS_VOLUME_CONTR_PATH}
+    healthcheck:
+      test: curl -f ${MILVUS_HOST}:${MILVUS_WEB_UI_PORT}/healthz || exit 1
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - ${MILVUS_PORT}:${MILVUS_PORT}
+      - ${MILVUS_WEB_UI_PORT}:${MILVUS_WEB_UI_PORT}
+    depends_on:
+      - aisearch-etcd
+      - aisearch-minio
+
+  aisearch-opensearch:
+    image: opensearchproject/opensearch:2.12.0
+    container_name: aisearch-opensearch
+    env_file:
+      - .env
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - ${OS_VOLUME_HOST_PATH}:${OS_VOLUME_CONTR_PATH}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    ports:
+      - 9200:9200
+    healthcheck:
+      test: curl -f http://localhost:${OS_PORT}
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  aisearch-updater:
+    container_name: aisearch-updater
+    command: >
+      sh -c "
+        /backend/scripts/wait_for_services.sh $$EXTRACT_LOGS_PATH &&
+        exec python3 -m app.scheduler
+      "
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - EXTRACT_LOGS_PATH=${LOGS_CONTR_DIR}/${EXTRACT_LOGS_LOCATION}
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+        restart: true
+      aisearch-opensearch:
+        condition: service_started
+        restart: true
+
+#  aisearch-vllm:
+#    image: vllm/vllm-openai:latest
+#    container_name: aisearch-vllm
+#    ports:
+#      - 8000:8000
+#    volumes:
+#      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+#    env_file:
+#      - .env
+#    environment:
+#      - NVIDIA_VISIBLE_DEVICES=all
+#      - HF_HUB_OFFLINE=1
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - capabilities: [ gpu ]
+#              driver: nvidia
+#              count: all
+#    shm_size: 16g
+#    command: >
+#      --model ${APP_MODELSTORE_CONTR_PATH}/${VLLM_MODEL_NAME}
+#      --quantization awq
+#      --served-model-name ${VLLM_MODEL_SERVED_NAME}
+#      --max-model-len ${VLLM_MAX_INPUT_TOKENS}
+#      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION}
+#      --trust-remote-code
+#      --port ${VLLM_PORT}

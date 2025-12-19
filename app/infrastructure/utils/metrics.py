@@ -1,15 +1,15 @@
-import time
 import logging
-from typing import Optional
+import time
+import typing as tp
+
 
 def init_logger(
-    name: Optional[str] = "METRICS",
+    name: str | None = "METRICS",
     level: int | str = logging.DEBUG,
     fmt: str = "%(asctime)s - %(levelname)s - %(message)s",
-    datefmt: Optional[str] = "%Y-%m-%d %H:%M:%S",
+    datefmt: str | None = "%Y-%m-%d %H:%M:%S",
 ) -> logging.Logger:
-    """
-    Возвращает настроенный logger для метрик.
+    """Возвращает настроенный logger для метрик.
     В окружении Celery не навешиваем свой StreamHandler, чтобы избежать дублей.
     """
     logger = logging.getLogger(name if name is not None else __name__)
@@ -26,7 +26,10 @@ def init_logger(
     logger.propagate = True  # отдаём вверх на единый формат Celery
     return logger
 
-def metrics_print(label: str, start_time: float, precision: int = 4, metrics_enabled: bool = True) -> float:
+
+def metrics_print(
+    label: str, start_time: float, precision: int = 4, metrics_enabled: bool = True
+) -> float:
     elapsed = time.perf_counter() - start_time
     elapsed_rounded = round(elapsed, precision)
     logger = init_logger()
@@ -34,3 +37,17 @@ def metrics_print(label: str, start_time: float, precision: int = 4, metrics_ena
         # Сообщение без собственного timestamp/level — их добавит верхний форматтер Celery
         logger.info(f"{label}: {elapsed_rounded:.{precision}f} сек")
     return elapsed_rounded
+
+
+def _now_ms() -> int:
+    """Получение текущего времени в мс"""
+    return int(time.time() * 1000)
+
+
+def _convert_to_ms_or_return_0(value: tp.Any) -> int:
+    """Преобразование значения в миллисекунды или возврат 0, если value не число"""
+    try:
+        num_value = float(value)
+        return int(num_value * 1000)
+    except (TypeError, ValueError, AttributeError, OverflowError):
+        return 0

@@ -13,7 +13,9 @@ class AccessBearer(HTTPBearer):
 
     async def __call__(self, request: Request):
         """Авторизация пользователя"""
-        credentials: HTTPAuthorizationCredentials | None = await super().__call__(request)
+        credentials: HTTPAuthorizationCredentials | None = await super().__call__(
+            request
+        )
         if credentials:
             if not credentials.scheme == "Bearer":
                 raise LoginError("Invalid authentication scheme")

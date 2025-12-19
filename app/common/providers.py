@@ -1,6 +1,7 @@
-from dishka import Provider, provide, Scope
-from fastapi.security import HTTPAuthorizationCredentials
+from dishka import Provider, Scope, provide
 from fastapi import Request
+from fastapi.security import HTTPAuthorizationCredentials
+
 from app.common.auth import AccessBearer
 
 
@@ -12,4 +13,3 @@ class AuthProvider(Provider):
         """Получение аутентификации."""
         bearer = AccessBearer()
         return await bearer(request)
-

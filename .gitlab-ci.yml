@@ -1,0 +1,86 @@
+default:
+  tags:
+    - aisearch
+stages:
+#  - lint
+  - deploy
+
+variables:
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  HTTP_PROXY: "http://10.0.20.6:80"
+  HTTPS_PROXY: "http://10.0.20.6:80"
+  NO_PROXY: "git.emias.mos.ru, docker,127.0.0.1,localhost"
+  no_proxy: "git.emias.mos.ru, docker,127.0.0.1,localhost"
+
+#lint:
+#  stage: lint
+#  image: python:3.12-slim
+#  variables:
+#    HTTP_PROXY: "http://10.0.20.6:80"
+#    HTTPS_PROXY: "http://10.0.20.6:80"
+#    http_proxy: "http://10.0.20.6:80"
+#    https_proxy: "http://10.0.20.6:80"
+#    NO_PROXY: "git.emias.mos.ru,localhost,127.0.0.1"
+#    no_proxy: "git.emias.mos.ru,localhost,127.0.0.1"
+#  before_script:
+#    - apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+#    - pip install --upgrade pip
+#    - pip install pre-commit
+#  script:
+#    - pre-commit run --all-files
+#  allow_failure: false
+#  rules:
+#    - if: $CI_COMMIT_BRANCH == "dev"
+#    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+
+
+deploy:
+  stage: deploy
+  image: ubuntu
+
+  variables:
+    HTTP_PROXY: "http://10.0.20.6:80"
+    HTTPS_PROXY: "http://10.0.20.6:80"
+    http_proxy: "http://10.0.20.6:80"
+    https_proxy: "http://10.0.20.6:80"
+    NO_PROXY: "git.emias.mos.ru,localhost,127.0.0.1"
+    no_proxy: "git.emias.mos.ru,localhost,127.0.0.1"
+
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install -y openssh-client git && rm -rf /var/lib/apt/lists/* )'
+    - eval $(ssh-agent -s)
+    - echo "$SSH_PRIVATE_KEY" | tr -d '\r' | ssh-add -
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    - ssh-keyscan 10.0.16.68 >> ~/.ssh/known_hosts
+    - ssh-keyscan -p 8522 10.0.51.4 >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+
+  script:
+    - cp "$MY_SECRET_FILE" .env
+    - ssh gitlabuser@10.0.16.68 "docker -v"
+    - |
+      ssh gitlabuser@10.0.16.68 << 'EOF'
+      APP_DIR="/var/projects/src/back/aisearch"
+
+      if [ ! -d "$APP_DIR/.git" ]; then
+        rm -rf "$APP_DIR"
+        git clone ssh://git@10.0.51.4:8522/emias.education.development/aisearch.git "$APP_DIR"
+      else
+        cd "$APP_DIR" && \
+          git fetch origin && \
+          git reset --hard origin/dev
+      fi
+
+      cd "$APP_DIR" && \
+        find scripts -type f -name "*.sh" -exec chmod +x {} +
+      EOF
+    - scp .env gitlabuser@10.0.16.68:/var/projects/src/back/aisearch/.env
+    - ssh gitlabuser@10.0.16.68 "cd /var/projects/src/back/aisearch && docker-compose stop && docker-compose up --build -d"
+
+  allow_failure: false
+
+  rules:
+    - if: $CI_COMMIT_BRANCH == "cicd"

@@ -33,15 +33,15 @@ class SyncRedisClientMethods:
             key, value, ex=ttl, exat=uttl, xx=is_exists, nx=not_exist, get=get_prev
         )
 
-    def delete(self, *keys) -> tp.Any:
+    def delete(self, *keys: bytes | str) -> tp.Any:
         """Удаление записей по ключам"""
         return self.client.delete(*keys)
 
-    def append(self, key: str, *values: tp.Union[bytes, memoryview, str, int, float]) -> int:
+    def append(self, key: str, *values: bytes | memoryview | str | int | float) -> int:
         """Добавление записи в список в конец по ключу"""
         return self.client.rpush(key, *values)
 
-    def prepend(self, key: str, *values: tp.Union[bytes, memoryview, str, int, float]) -> int:
+    def prepend(self, key: str, *values: bytes | memoryview | str | int | float) -> int:
         """Добавление записи в список в начало по ключу"""
         return self.client.lpush(key, *values)
 
@@ -58,7 +58,7 @@ class SyncRedisClientMethods:
 
     def multiple_get(
         self,
-        keys: tp.Union[bytes, str, memoryview, tp.Iterable[tp.Union[bytes, str, memoryview]]],
+        keys: bytes | str | memoryview | tp.Iterable[bytes | str | memoryview],
     ) -> list[str] | None:
         """Получает значения для нескольких ключей"""
         values = self.client.mget(*keys)
@@ -100,7 +100,9 @@ class SyncRedisClientMethods:
         lt: bool = False,
     ) -> None:
         """Устанавливает время жизни ключа"""
-        return self.client.expire(name=key, time=ttl, nx=not_exist, xx=if_exist, gt=gt, lt=lt)
+        return self.client.expire(
+            name=key, time=ttl, nx=not_exist, xx=if_exist, gt=gt, lt=lt
+        )
 
     def list_remove(self, key: str, value: str, count: int = 0) -> int | None:
         """Удаляет элементы из списка по значению"""
@@ -109,9 +111,9 @@ class SyncRedisClientMethods:
     def scan_iter(
         self,
         match: str | None = None,
-        count: tp.Union[bytes, str, memoryview, None] = None,
+        count: bytes | str | memoryview | None = None,
         _type: str | None = None,
-        **kwargs: tp.Any
+        **kwargs: tp.Any,
     ) -> tp.Iterator[tp.Any]:
         """Итератор по ключам с фильтрацией"""
         return self.client.scan_iter(match=match, count=count, _type=_type, **kwargs)

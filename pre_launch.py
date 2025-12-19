@@ -1,15 +1,104 @@
 import argparse
 import asyncio
-import gc
-import importlib
+import datetime
 import logging
 import os
+import sys
 import traceback
+from pathlib import Path
 
-
-import torch
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
+
+from app.infrastructure.utils.prepare_dataframe import (
+    dedup_by_question_any,
+    prepare_dataframe,
+    rename_dataframe
+)
+from app.infrastructure.utils.universal import cleanup_resources
+
+
+def setup_logger(logtype: str) -> logging.Logger:
+    """Настраивает и возвращает логгер для pre_launch скрипта."""
+    prefix = "[pre_launch.py]"
+
+    logger = logging.getLogger(logtype)
+
+    original_handlers = logger.handlers.copy()
+    for handler in original_handlers:
+        logger.removeHandler(handler)
+
+    logs_path = (
+        os.getenv("CELERY_LOGS_PATH") if logtype == "celery" else os.getenv("LOG_PATH")
+    )
+
+    if not logs_path:
+        raise ValueError(f"Переменная окружения для логов не установлена: {logtype}")
+
+    log_file = Path(logs_path)
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    class CustomFormatter(logging.Formatter):
+        def format(self, record: logging.LogRecord) -> str:
+            ts = datetime.datetime.now(tz=datetime.UTC).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            base = f"{ts} {prefix} [{record.levelname}] {record.getMessage()}"
+            if record.exc_info:
+                base += "\n" + self.formatException(record.exc_info)
+            return base
+
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(CustomFormatter())
+    file_handler.setLevel(logging.INFO)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setFormatter(CustomFormatter())
+    stream_handler.setLevel(logging.INFO)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(stream_handler)
+    logger.setLevel(logging.INFO)
+
+    logger.propagate = False
+
+    return logger
+
+
+def exit_with_error(logger: logging.Logger, text: str, code: int = 1) -> None:
+    """Завершить работу скрипта с ошибкой"""
+    logger.error(text)
+    logger.info(f"Завершение pre_launch ({code})")
+    sys.exit(code)
+
+
+def prepare_data_from_file(
+    file_path: str, id_field_name: str, logger: logging.Logger
+) -> tuple:
+    """Загружает данные из Parquet или Excel и подготавливает их для обработки.
+    Фильтрует по наличию текста в колонках и условию для пользователя.
+    """
+    import pandas as pd
+
+    logger.info(f"Чтение файла {file_path} ...")
+    df = pd.DataFrame()
+    try:
+        if file_path.endswith(".parquet"):
+            df = pd.read_parquet(file_path)
+        elif file_path.endswith((".xls", ".xlsx")):
+            df = pd.read_excel(file_path)
+        else:
+            exit_with_error(logger, f"Неподдерживаемый формат файла: {file_path}")
+        if not df.empty:
+            df = rename_dataframe(df)
+            df = df.drop_duplicates(subset=[id_field_name], keep="last")
+            df = dedup_by_question_any(df)
+        else:
+            raise Exception
+    except Exception as e:
+        exit_with_error(logger, f"Ошибка при загрузке файла {file_path}: {e!r}")
+
+    return prepare_dataframe(df, logger)
 
 
 async def load_collection_and_index(
@@ -17,74 +106,84 @@ async def load_collection_and_index(
     logger: logging.Logger,
     collection_name: str = "kb_default",
 ) -> None:
-    """Загрузить коллекцию в Milvus DB и обновить индексы."""
-    
-    column_for_vector = settings.milvus.search_fields
-    
+    from app.infrastructure.adapters.open_search import OpenSearchAdapter
+    from sentence_transformers import SentenceTransformer
     from app.infrastructure.storages.milvus import MilvusDatabase
 
-    milvus = MilvusDatabase(settings=settings.milvus, logger=logger)
+    milvus = None
+    model = None
 
-    logger.info(
-        f"Выполняется загрузка модели {settings.milvus.model_name.split('/')[-1]} ..."
-    )
-    from sentence_transformers import SentenceTransformer
-
-    model = SentenceTransformer(settings.milvus.model_name)
-    logger.info("Модель успешно загружена")
-
-    # читаем parquet, но превращаем сразу в list[str] и list[dict]
-    import pandas as pd
-
-    df = pd.read_parquet(f"{collection_name}.parquet")
-    df = df[
-        df[column_for_vector].notna()
-        # & (df[column_for_vector].astype(str).str.len() > 0)
-        # & (df["answer"].astype(str).str.len() > 2)
-        # & (df["for_user"] == "Да")
-    ].reset_index(drop=True)
-
-    documents = df[column_for_vector].astype(str).tolist()
-    metadata = df.to_dict(orient="records")
-    # --- OpenSearch ---
-    if settings.milvus.recreate_collection or settings.opensearch.recreate_index:
-        from app.infrastructure.adapters.open_search import OpenSearchAdapter
-
-        os_adapter = OpenSearchAdapter(settings=settings, logger=logger)
-        os_adapter.build_index(data=df.to_dict(orient="records"))
-
-    # --- BM25 ---
-    if settings.milvus.recreate_collection or settings.bm25.recreate_index:
-        from app.infrastructure.adapters.bm25 import BM25Adapter
-
-        BM25Adapter.build_index(
-            data=df[settings.bm25.schema_fields].to_dict(orient="records"),
-            index_path=settings.bm25.index_path,
-            texts=documents,
-            logger=logger,
-        )
-
-    # --- Milvus ---
     try:
-        await milvus.ensure_collection(
-            collection_name=collection_name,
-            model=model,
-            documents=documents,
-            metadata=metadata,
-            recreate=settings.milvus.recreate_collection,
+        # --- Milvus ---
+        logger.info("Подключение к Milvus DB ...")
+        try:
+            milvus = MilvusDatabase(settings=settings.milvus, logger=logger)
+        except Exception as e:
+            exit_with_error(logger, f"Произошла ошибка при подключении к Milvus DB: {e!r}")
+
+        # --- Model ---
+        logger.info(f"Загрузка модели {settings.milvus.model_name.split('/')[-1]} ...")
+        try:
+            model = SentenceTransformer(settings.milvus.model_name)
+        except Exception as e:
+            exit_with_error(logger, f"Произошла ошибка при загрузке модели: {e!r}")
+        else:
+            logger.info("Модель успешно загружена")
+
+        logger.info(
+            "Загрузка коллекции Milvus DB "
+            f"({'с пересозданием коллекции' if settings.milvus.recreate_collection else 'без пересоздания коллекции'}) ..."
         )
-    except Exception as e:
-        logger.error(f"Произошла ошибка при загрузке коллекции: {e!r}")
-        await milvus.delete_collection(collection_name=collection_name)
 
-    await milvus.preload_collections()
+        collection_exists = await milvus.collection_ready(collection_name)
+        collection_empty = (not collection_exists) or (not await milvus.collection_not_empty(collection_name))
 
-    await milvus.close()
-    del model
-    importlib.invalidate_caches()
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
+        recreate_milvus_collection = (
+            settings.milvus.recreate_collection or (not collection_exists) or collection_empty
+        )
+
+        metadata = None  # понадобится для OpenSearch
+        if recreate_milvus_collection or settings.opensearch.recreate_index:
+            documents, metadata, df = prepare_data_from_file(settings.app.collection_file_path, 'ext_id', logger)
+
+            if recreate_milvus_collection:
+                if collection_exists:
+                    await milvus.safe_delete_collection(collection_name)
+
+                await milvus.initialize_collection(
+                    collection_name=collection_name,
+                    model=model,
+                    documents=documents,
+                    metadata=metadata,
+                )
+
+        await milvus.preload_collections()
+        if not await milvus.collection_not_empty(collection_name):
+            exit_with_error(logger, "❌ Milvus коллекция пуста или не создана!")
+
+        # --- OpenSearch ---
+        os_adapter = OpenSearchAdapter(settings=settings, logger=logger)
+
+        if settings.opensearch.recreate_index:
+            logger.info("Построение индекса OpenSearch ...")
+            try:
+                os_adapter.build_index(data=metadata or [])
+            except Exception as e:
+                exit_with_error(logger, f"Произошла ошибка при загрузке индекса OpenSearch: {e!r}")
+
+        os_adapter.ensure_index_not_empty()
+
+    finally:
+        # закрываем Milvus даже при SystemExit/Exception
+        if milvus is not None:
+            try:
+                await milvus.close()
+            except Exception:
+                logger.exception("Не удалось корректно закрыть Milvus")
+
+        # освобождаем ресурсы модели (GPU/память) всегда
+        cleanup_resources(logger, model)
+
 
 
 async def pre_launch() -> None:
@@ -102,32 +201,34 @@ async def pre_launch() -> None:
     if args.local:
         os.environ["MILVUS_HOST"] = "localhost"
         os.environ["MILVUS_MODEL_NAME"] = (
-            os.environ["APP_MODELSTORE_HOST_PATH"] + "/LaBSE-ru-turbo"
+            f"{os.environ['APP_MODELSTORE_HOST_PATH']}/{os.environ['MILVUS_MODEL_NAME']}"
         )
         os.environ["RERANKER_MODEL_NAME"] = (
-            os.environ["APP_MODELSTORE_HOST_PATH"] + "/cross-encoder-russian-msmarco"
+            f"{os.environ['APP_MODELSTORE_HOST_PATH']}/{os.environ['RERANKER_MODEL_NAME']}"
         )
         os.environ["OS_HOST"] = "localhost"
-        os.environ["BM25_INDEX_PATH"] = os.environ["BM25_INDEX_PATH_HOST"]
 
     from app.settings.config import Settings
 
     settings = Settings()
 
-    from app.common.logger import AISearchLogger, LoggerType
+    logger = setup_logger(args.logtype)
 
-    logger = AISearchLogger(logger_type=LoggerType(args.logtype))
-
-    logger.info("Запуск приложения...")
+    logger.info("Запуск pre_launch ...")
     if args.load:
         logger.info("Загрузка данных в Milvus DB...")
         try:
-            await load_collection_and_index(settings, logger)
-        except Exception as e:
-            logger.error(
-                f"Ошибка при ожидании базы данных: ({type(e)}): {traceback.format_exc()}"
+            await load_collection_and_index(
+                settings, logger, settings.milvus.collection_name
             )
-            raise e
+        except Exception as e:
+            exit_with_error(
+                logger,
+                "Произошла неожиданная ошибка в работе pre_launch -> load_collection_and_index: "
+                + f"({type(e)}): {traceback.format_exc()}",
+            )
+
+    logger.info("Завершение pre_launch (0)")
 
 
 if __name__ == "__main__":

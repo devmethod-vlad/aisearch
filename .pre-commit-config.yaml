@@ -1,30 +1,35 @@
 repos:
--   repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
-    rev: v0.8.0
+  - repo: https://gitlab.com/vojko.pribudic.foss/pre-commit-update
+    rev: v0.9.0
     hooks:
-    -   id: pre-commit-update
+      - id: pre-commit-update
         args: [--dry-run]
--   repo: https://github.com/pre-commit/pre-commit-hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-    -   id: trailing-whitespace
-    -   id: end-of-file-fixer
-    -   id: check-yaml
-    -   id: check-added-large-files
-    -   id: check-merge-conflict
--   repo: https://github.com/psf/black
-    rev: '25.9.0'
+      - id: trailing-whitespace
+        exclude: ^app/infrastructure/migrations/
+      - id: end-of-file-fixer
+        exclude: ^app/infrastructure/migrations/
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+  - repo: https://github.com/psf/black
+    rev: '25.12.0'
     hooks:
-    -   id: black
--   repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.13.2
+      - id: black
+        exclude: ^app/infrastructure/migrations/
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
     hooks:
-    -   id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
--   repo: local
+    - id: ruff
+      args: [--fix, --exit-non-zero-on-fix]
+      exclude: ^app/infrastructure/migrations/
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: 'v1.19.1'
     hooks:
-    -   id: mypy
-        name: poetry_mypy
-        entry: poetry run mypy --config-file pyproject.toml .
-        language: system
+      - id: mypy
+        args: [--config-file, mypy.ini, .]
+        types: [python]
         pass_filenames: false
+        exclude: ^app/infrastructure/migrations/

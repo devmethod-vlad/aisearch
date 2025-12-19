@@ -1,5 +1,5 @@
 # Семантический поиск
-
+dfdfd
 <p>
     <a href="https://fastapi.tiangolo.com"><img alt="" src="https://img.shields.io/badge/FastAPI-009688.svg?style=flat&logo=FastAPI&logoColor=white"></a>
     <a href="https://milvus.io/"><img alt="" src="https://img.shields.io/badge/Milvus-00B7EB"></a>
@@ -13,6 +13,10 @@
 
     COMPOSE_PATH_SEPARATOR=';'
     COMPOSE_FILE='docker-compose.yml;docker-compose.dev.yml'
+
+    LOGS_HOST_DIR=./logs
+    LOGS_CONTR_DIR=/usr/src/logs
+    LOGS_ACCESS_LOCATION=/app/access.log
 
     CUDA_IMAGE=nvidia/cuda:12.8.0-devel-ubuntu22.04
     CUDA_WHEEL=cu128
@@ -32,14 +36,13 @@
     APP_ACCESS_KEY=123
     APP_LOG_LEVEL=info
     APP_PREFIX=
-    APP_LOGS_HOST_PATH=./logs/app
-    APP_LOGS_CONTR_PATH=/usr/src/logs/app
-    APP_GUNICORN_LOGS_HOST_PATH=./logs/gunicorn
-    APP_GUNICORN_LOGS_CONTR_PATH=/usr/src/logs/gunicorn
+    APP_LOGS_LOCATION=app/app.log
+    APP_LOG_LEVEL=INFO
     APP_USE_CACHE=false  # Использовать ли кэширование
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
     APP_NORMALIZE_QUERY=true # Нормализовать ли запрос
+    APP_COLLECTION_FILE_PATH=kb_default.parquet
 
     ETCD_AUTO_COMPACTION_MODE=revision # periodic
     ETCD_AUTO_COMPACTION_RETENTION=1000 # time, like "1h"
@@ -75,7 +78,7 @@
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
     MILVUS_MODEL_NAME=USER-bge-m3
-    MILVUS_SCHEMA_PATH=app/config/conf.json
+    MILVUS_SCHEMA_PATH=app/settings/conf.json
 
     # === Очередь LLM (для отложенной генерации, если нет слота семафора) ===
     LLM_QUEUE_LIST_KEY=llm:queue:list
@@ -85,9 +88,8 @@
     LLM_QUEUE_DRAIN_INTERVAL_SEC=1
 
     # === Переключатели поиска ===
-    SEARCH_USE_HYBRID=true        # если false -> только dense + (опц.) reranker
-    SEARCH_USE_OPENSEARCH=true    # взаимоисключимо с BM25 (приоритет OS)
-    SEARCH_USE_BM25=false
+    SEARCH_USE_HYBRID=true        # если false -> только dense + (опц.)
+    SEARCH_USE_OPENSEARCH=true
     SEARCH_USE_RERANKER=true
 
     # === Параметры гибридного склейщика ===
@@ -97,9 +99,6 @@
     HYBRID_W_CE=0.6
     HYBRID_W_DENSE=0.25
     HYBRID_W_LEX=0.15
-    HYBRID_DENSE_THRESHOLD=0.0
-    HYBRID_LEX_THRESHOLD=0.0
-    HYBRID_CE_THRESHOLD=0.0
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
@@ -110,9 +109,11 @@
     HYBRID_DENSE_REL_MIN=0.6
     HYBRID_LEX_REL_MIN=0.5
     HYBRID_PRECUT_MIN_KEEP=3
+    HYBRID_ENABLE_INTERMEDIATE_RESULTS=true
+    HYBRID_INTERMEDIATE_RESULTS_TOP_K=5
 
     # === SlowAPI ===
-    
+
     SLOWAPI_LIMIT_SEARCH=5/minute
     SLOWAPI_LIMIT_GENERATE=5/minute
 
@@ -134,20 +135,12 @@
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000
     OS_RECREATE_INDEX=true
-    OS_SCHEMA_PATH=app/config/os_index.json
+    OS_SCHEMA_PATH=app/settings/os_index.json
     OS_VOLUME_HOST_PATH=./volumes/opensearch-data
     OS_VOLUME_CONTR_PATH=/usr/share/opensearch/data
-    
+
     NLTK_DATA_HOST_PATH=E:/nltk    # выкачка ресурсов через python -m nltk.downloader -d путь_к_папке punkt stopwords punkt_tab
     NLTK_DATA_CONTR_PATH=/srv/nltk_data
-    
-
-    # === BM25 (Whoosh) ===
-    BM25_INDEX_PATH_HOST=C:/Users/omka/models/1
-    BM25_INDEX_PATH=/usr/src/bm25index
-    BM25_SCHEMA_FIELDS=ext_id,question,analysis,answer
-    BM25_OUTPUT_FIELDS=ext_id,question,analysis,answer
-    BM25_RECREATE_INDEX=false
 
     REDIS_HOSTNAME=redis
     REDIS_PORT=6379
@@ -155,11 +148,12 @@
 
     REDISINSIGHT_PORT=6399
 
-    CELERY_LOGS_HOST_PATH=./logs/celery
-    CELERY_LOGS_CONTR_PATH=/usr/src/logs/celery
-    CELERY_LOGS_QUEUE_HOST_PATH=./logs/queue
-    CELERY_LOGS_QUEUE_CONTR_PATH=/usr/src/logs/queue
+    CELERY_LOGS_LOCATION=/celery/celery.log
+    CELERY_LOG_LEVEL=INFO
+    CELERY_LOGS_QUEUE_LOCATION=/queue/queue.log
+    CELERY_LOG_QUEUE_LEVEL=INFO
     CELERY_WORKERS_NUM=2
+    CELERY_GRACE_PERIOD_SECONDS=15
 
     # === Глобальный семафор (общий лимит конкаренси для поиска и генерации) ===
     LLM_GLOBAL_SEM_REDIS_DSN="redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}"
@@ -200,16 +194,44 @@
 
     TIMEIT_LOG_METRICS_ENABLED=true  # включить логгирование времени
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
-    
+
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
     # EXTRACT_EDU_EMIAS_TOKEN=""
     EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
+    EXTRACT_EDU_TIMEOUT=20
     EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
     EXTRACT_VIO_BASE_FILE_NAME="Вопросы_и_ответы.xlsx"
-    EXTRACT_CRON_UPDATE_HOURS=12
-    EXTRACT_LOGS_CONTR_PATH=/usr/src/logs/updater
-    EXTRACT_LOGS_HOST_PATH=./logs/updater
+    EXTRACT_CRON_UPDATE_TIMES="3:00, 7:00"
+    EXTRACT_LOGS_LOCATION=/updater/updater.log
+    EXTRACT_LOG_LEVEL=INFO
     EXTRACT_BASE_HARVESTER_API_URL="https://edu.emias.ru/edu-rest-api/test/data-harvester"
+    EXTRACT_VIO_HARVESTER_SUFFIX="/vio/runtime_harvest"
+    EXTRACT_KB_HARVESTER_SUFFIX="/knowledge-base/collect-all"
+
+    # === PosgreSQL ===
+    POSTGRES_USER=postgres
+    POSTGRES_PASSWORD=111
+    POSTGRES_HOST=aisearch-db
+    POSTGRES_PORT=5432
+    POSTGRES_DB=aisearch
+    POSTGRES_VOLUME_HOST_PATH=./volumes/pgdata
+    POSTGRES_VOLUME_CONTR_PATH=/var/lib/postgresql/data
+
+    PGADMIN_DEFAULT_EMAIL=pgadmin@example.com
+    PGADMIN_DEFAULT_PASSWORD=admin
+    PGADMIN_PORT=5050
+
+    SHORT_DENSE_TOP_K=20
+    SHORT_LEX_TOP_K=50
+    SHORT_TOP_K=5
+    SHORT_W_CE=0.6
+    SHORT_W_DENSE=0.25
+    SHORT_W_LEX=0.15
+    SHORT_USE_HYBRID=true        # если false -> только dense + (опц.)
+    SHORT_USE_OPENSEARCH=true
+    SHORT_USE_RERANKER=true
+    SHORT_MODE=true
+    SHORT_MODE_LIMIT=4
 
 ## Сборка образов
 Для ускорения процесса работы разделим сборку на три образа:
@@ -285,7 +307,41 @@
 
 Если правило форматирования в конкретном случае выполнить невозможно - сбоку от "проблемной строки" оставляем коммент вида '# noqa: <Код правила>'
 
-## Установка всех зависимостей в единое окружение при использовании Poetry (Windows, cmd)
+## Установка всех зависимостей в единое окружение (Windows, cmd)
 ```
-for /d %d in (buildeps\*) do (poetry lock -C "%d" && poetry install -C "%d" --no-root)
+uv pip compile pyproject.toml --extra api --extra search --extra queue --extra dev -o requirements.txt && uv pip sync requirements.txt --system && del requirements.txt
+```
+## Сборка Dockerfile_search_base + Dockerfile_search_deps + Dockerfile_search_main (Windows, cmd)
+Поднимать локальный registry c
+```
+REGISTRY_STORAGE_DELETE_ENABLED=true
+```
+
+Базовый образ (Dockerfile_search_base)
+```
+powershell -Command "& { Get-Content .env | Where-Object { $_ -match '^\s*[^#]+=' } | ForEach-Object { $n,$v = $_ -split '=', 2; Set-Item Env:$n ($v.Trim([char]34,[char]39,[char]96).Trim()) }; docker build -f Dockerfile_search_base -t $env:IMAGE_NAME_BASE --build-arg http_proxy=$env:HTTP_PROXY --build-arg https_proxy=$env:HTTPS_PROXY --build-arg HTTP_PROXY=$env:HTTP_PROXY --build-arg HTTPS_PROXY=$env:HTTPS_PROXY .; docker tag $env:IMAGE_NAME_BASE $env:REGISTRY/$env:IMAGE_NAME_BASE; $old_digest = docker inspect --format='{{index .RepoDigests 0}}' ($env:REGISTRY + '/' + $env:IMAGE_NAME_BASE) 2>$null; if ($old_digest) { $old_digest = $old_digest.split('@')[1]; try { Invoke-RestMethod -Uri ('http://' + $env:REGISTRY + '/v2/' + $env:IMAGE_NAME_BASE + '/manifests/' + $old_digest) -Method Delete } catch { if ($_.Exception.Response.StatusCode -ne 'NotFound') { throw } } }; docker push $env:REGISTRY/$env:IMAGE_NAME_BASE; docker rmi $env:IMAGE_NAME_BASE -f 2>$null; }"
+```
+
+Крупные зависимости (Dockerfile_search_deps)
+```
+powershell -Command "& { Get-Content .env | Where-Object { $_ -match '^\s*[^#]+=' } | ForEach-Object { $n,$v = $_ -split '=', 2; Set-Item Env:$n ($v.Trim([char]34,[char]39,[char]96).Trim()) }; docker build -f Dockerfile_search_deps -t $env:IMAGE_NAME_DEPS --build-arg http_proxy=$env:HTTP_PROXY --build-arg https_proxy=$env:HTTPS_PROXY --build-arg HTTP_PROXY=$env:HTTP_PROXY --build-arg HTTPS_PROXY=$env:HTTPS_PROXY --build-arg CUDA_WHEEL=$env:CUDA_WHEEL .; docker tag $env:IMAGE_NAME_DEPS $env:REGISTRY/$env:IMAGE_NAME_DEPS; $old_digest = docker inspect --format='{{index .RepoDigests 0}}' ($env:REGISTRY + '/' + $env:IMAGE_NAME_DEPS) 2>$null; if ($old_digest) { $old_digest = $old_digest.split('@')[1]; try { Invoke-RestMethod -Uri ('http://' + $env:REGISTRY + '/v2/' + $env:IMAGE_NAME_DEPS + '/manifests/' + $old_digest) -Method Delete } catch { if ($_.Exception.Response.StatusCode -ne 'NotFound') { throw } } }; docker push $env:REGISTRY/$env:IMAGE_NAME_DEPS; docker rmi $env:IMAGE_NAME_DEPS -f 2>$null; }"
+```
+
+Остальные зависимости (Dockerfile_search_main, поменять на Dockerfile_search_test по желанию)
+```
+powershell -Command "& { Get-Content .env | Where-Object { $_ -match '^\s*[^#]+=' } | ForEach-Object { $n,$v = $_ -split '=', 2; Set-Item Env:$n ($v.Trim([char]34,[char]39,[char]96).Trim()) }; docker build -f Dockerfile_search_main -t $env:IMAGE_NAME --build-arg http_proxy=$env:HTTP_PROXY --build-arg https_proxy=$env:HTTPS_PROXY --build-arg HTTP_PROXY=$env:HTTP_PROXY --build-arg HTTPS_PROXY=$env:HTTPS_PROXY .; docker tag $env:IMAGE_NAME $env:REGISTRY/$env:IMAGE_NAME; $old_digest = docker inspect --format='{{index .RepoDigests 0}}' ($env:REGISTRY + '/' + $env:IMAGE_NAME) 2>$null; if ($old_digest) { $old_digest = $old_digest.split('@')[1]; try { Invoke-RestMethod -Uri ('http://' + $env:REGISTRY + '/v2/' + $env:IMAGE_NAME + '/manifests/' + $old_digest) -Method Delete } catch { if ($_.Exception.Response.StatusCode -ne 'NotFound') { throw } } }; docker push $env:REGISTRY/$env:IMAGE_NAME; docker rmi $env:IMAGE_NAME -f 2>$null; }"
+```
+## Установка CUDA
+Установить [CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive).
+
+Добавить путь CUDA в PATH
+```
+echo 'export PATH=/usr/local/cuda/bin:${PATH}' >> ~/.bashrc
+echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}' >> ~/.bashrc
+bashrc && source ~/.bashrc
+```
+
+Проверить
+```
+nvcc --version
 ```

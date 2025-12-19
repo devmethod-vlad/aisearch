@@ -3,8 +3,8 @@ from pathlib import Path
 import toml
 
 
-def get_app_info() -> dict:
-    """Получение версии приложения"""
+def get_app_info() -> dict[str, str]:
+    """Получение информации о приложении из pyproject.toml"""
     current_file_path = Path(__file__).resolve()
     project_root = current_file_path.parents[2]
     pyproject_path = project_root / "pyproject.toml"
@@ -15,8 +15,9 @@ def get_app_info() -> dict:
     with open(pyproject_path, encoding="utf-8") as f:
         info: dict = toml.load(f)
 
+    project: dict[str, str] = info.get("project", {})
     return {
-        "name": info["tool"]["poetry"]["name"],
-        "version": info["tool"]["poetry"]["version"],
-        "description": info["tool"]["poetry"]["description"],
+        "name": project.get("name", "unknown"),
+        "version": project.get("version", "0.0.0"),
+        "description": project.get("description", ""),
     }

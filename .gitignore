@@ -10,14 +10,12 @@ volumes
 *.sw?
 .pytest_cache
 .mypy_cache
+.ruff_cache
 .env
-.idea
-.vscode
 venv
 __pycache__
 /tests/tmp
 celerybeat-schedule
-bm25index
 poetry.lock
 *.xlsx
 /nltk/

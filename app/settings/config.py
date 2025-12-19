@@ -1,9 +1,14 @@
-import json
 import typing as tp
+from collections.abc import Sequence
+from datetime import time
 from pathlib import Path
-from typing import Self
 
-from pydantic import RedisDsn, model_validator
+from pydantic import (
+    PostgresDsn,
+    RedisDsn,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,11 +30,13 @@ class AppSettings(EnvBaseSettings):
     access_key: str
     prefix: str = ""
     use_cache: bool = True
+
+    logs_path: str | None = None
+    logs_access_path: str | None = None
     log_level: str = "INFO"
-    logs_host_path: str
-    logs_contr_path: str
-    gunicorn_logs_contr_path: str
+
     normalize_query: bool
+    collection_file_path: str
 
     model_config = SettingsConfigDict(env_prefix="app_")
 
@@ -39,6 +46,7 @@ class MilvusSettings(EnvBaseSettings):
 
     host: str
     port: int
+    web_ui_port: int
     use_ssl: bool = False
     connection_timeout: int
     query_timeout: int
@@ -46,7 +54,7 @@ class MilvusSettings(EnvBaseSettings):
     model_name: str
     recreate_collection: bool = False
     vector_field: str = "embedding"
-    schema_path: str = "app/config/conf.json"
+    schema_path: str = "app/settings/conf.json"
     id_field: str = "ext_id"
     metric_type: str = "IP"
     search_fields: str = "question"
@@ -61,8 +69,6 @@ class MilvusSettings(EnvBaseSettings):
             self.output_fields = self.output_fields.split(",")
         return self
 
-
-
     model_config = SettingsConfigDict(env_prefix="milvus_")
 
 
@@ -75,12 +81,15 @@ class RedisSettings(EnvBaseSettings):
     dsn: RedisDsn | str | None = None
 
     @model_validator(mode="after")
-    def assemble_redis_connection(self) -> Self:
+    def assemble_redis_connection(self) -> tp.Self:
         """Сборка Redis DSN"""
         if self.dsn is None:
             self.dsn = str(
                 RedisDsn.build(
-                    scheme="redis", host=self.hostname, port=self.port, path=f"/{self.database}"
+                    scheme="redis",
+                    host=self.hostname,
+                    port=self.port,
+                    path=f"/{self.database}",
                 )
             )
         return self
@@ -114,9 +123,6 @@ class HybridSearchSettings(EnvBaseSettings):
     w_ce: float = 0.6
     w_dense: float = 0.25
     w_lex: float = 0.15
-    dense_threshold: float = 0.0
-    lex_threshold: float = 0.0
-    ce_threshold: float = 0.0
     dense_abs_min: float = 0.25
     dense_rel_min: float = 0.6
     lex_rel_min: float = 0.5
@@ -125,13 +131,19 @@ class HybridSearchSettings(EnvBaseSettings):
     version: str = "v1"
     collection_name: str = "kb_default"
     merge_by_field: str = "ext_id"
-    merge_fields: str | list[str] =    "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+    merge_fields: str | list[str] = (
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+    )
+    enable_intermediate_results: bool
+    intermediate_results_top_k: int
 
     @model_validator(mode="after")
     def assemble_hybrid_settings(self) -> tp.Self:
         """Парсинг merge_fields из строки в список"""
         if isinstance(self.merge_fields, str):
-            self.merge_fields = [f.strip() for f in self.merge_fields.split(",") if f.strip()]
+            self.merge_fields = [
+                f.strip() for f in self.merge_fields.split(",") if f.strip()
+            ]
 
         return self
 
@@ -142,7 +154,6 @@ class SearchSwitches(EnvBaseSettings):
     """Настройки переключателей поиска"""
 
     use_opensearch: bool
-    use_bm25: bool
     use_reranker: bool
     use_hybrid: bool
     model_config = SettingsConfigDict(env_prefix="search_")
@@ -184,13 +195,15 @@ class OpenSearchSettings(EnvBaseSettings):
     user: str | None = None
     password: str | None = None
     search_fields: str | list[str] = "question,analysis,answer"
-    output_fields: str | list[str] = "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+    output_fields: str | list[str] = (
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+    )
     operator: str = "or"
     min_should_match: int = 1
     fuzziness: int = 0
     use_rescore: bool = False
     index_answer: bool = True
-    schema_path: str = "app/config/os_index.json"
+    schema_path: str = "app/settings/os_index.json"
     bulk_chunk_size: int = 1000
     recreate_index: bool = True
     model_config = SettingsConfigDict(env_prefix="os_")
@@ -199,35 +212,20 @@ class OpenSearchSettings(EnvBaseSettings):
     def assemble_os_settings(self) -> tp.Self:
         """Парсинг fields из строки в список"""
         if isinstance(self.search_fields, str):
-            self.search_fields = [f.strip() for f in self.search_fields.split(",") if f.strip()]
+            self.search_fields = [
+                f.strip() for f in self.search_fields.split(",") if f.strip()
+            ]
         if isinstance(self.output_fields, str):
-            self.output_fields = [f.strip() for f in self.output_fields.split(",") if f.strip()]
+            self.output_fields = [
+                f.strip() for f in self.output_fields.split(",") if f.strip()
+            ]
 
         return self
 
-
-class BM25Settings(EnvBaseSettings):
-    """Настройки BM25"""
-
-    engine: str = "whoosh"
-    index_path: str = "/data/bm25_index"
-    schema_fields: str | list[str] = "ext_id,question,analysis,answer"
-    output_fields: str | list[str] = "ext_id,question,analysis,answer"
-    recreate_index: bool = False
-    model_config = SettingsConfigDict(env_prefix="bm25_")
-
-    @model_validator(mode="after")
-    def assemble_bm25_settings(self) -> tp.Self:
-        """Парсинг fields из строки в список"""
-        if isinstance(self.schema_fields, str):
-            self.schema_fields = [f.strip() for f in self.schema_fields.split(",") if f.strip()]
-        if isinstance(self.output_fields, str):
-            self.output_fields = [f.strip() for f in self.output_fields.split(",") if f.strip()]
-
-        return self
 
 class SlowAPISettings(EnvBaseSettings):
     """Настройки slowapi лимитов"""
+
     search: str
     generate: str
 
@@ -251,8 +249,10 @@ class RerankerSettings(EnvBaseSettings):
     def assemble_pairs_settings(self) -> tp.Self:
         """Парсинг pairs_fields из строки в список"""
         if isinstance(self.pairs_fields, str):
-            self.pairs_fields = [f.strip() for f in self.pairs_fields.split(",") if f.strip()]
-            
+            self.pairs_fields = [
+                f.strip() for f in self.pairs_fields.split(",") if f.strip()
+            ]
+
         return self
 
 
@@ -268,10 +268,11 @@ class WarmupSettings(BaseSettings):
 class CelerySettings(EnvBaseSettings):
     """Настройки Celery"""
 
-    logs_host_path: str
-    logs_queue_host_path: str
-    logs_contr_path: str
-    logs_queue_contr_path: str
+    logs_path: str | None = None
+    log_level: str = "INFO"
+    logs_queue_path: str | None = None
+    log_queue_level: str = "INFO"
+
     workers_num: int
 
     model_config = SettingsConfigDict(env_prefix="celery_")
@@ -284,31 +285,112 @@ class ExtractEduSettings(EnvBaseSettings):
     base_harvester_api_url: str
     edu_emias_token: str
     edu_emias_attachments_page_id: str
+    edu_timeout: int
     knowledge_base_file_name: str
     vio_base_file_name: str
-    cron_update_hours: int
-    logs_host_path: str
-    logs_contr_path: str
+    cron_update_times: str
+    vio_harvester_suffix: str
+    kb_harvester_suffix: str
 
-
+    logs_path: str | None = None
+    log_level: str = "INFO"
 
     model_config = SettingsConfigDict(env_prefix="extract_")
 
+    @field_validator("cron_update_times")
+    @classmethod
+    def validate_cron_hours(cls, v: str) -> str:
+        """Валидация cron_update_times"""
+        if not v:
+            raise ValueError("cron_update_times не может быть пустой строкой")
+
+        for time_str in v.split(","):
+            time_s = time_str.strip()
+            try:
+                hour_str, minute_str = time_s.split(":")
+                time(int(hour_str), int(minute_str))
+            except Exception:
+                raise ValueError(
+                    f'Некорректное время "{time_s}". '
+                    f'Используйте формат HH:MM, например "09:30" или "13:20, 15:00"'
+                )
+
+        return v
+
+
+class ShortSettings(EnvBaseSettings):
+    """Настройки для short запросов"""
+
+    mode: bool = True
+    mode_limit: int
+    use_opensearch: bool
+    use_reranker: bool
+    use_hybrid: bool
+    dense_top_k: int = 20
+    lex_top_k: int = 50
+    top_k: int = 5
+    w_ce: float = 0.6
+    w_dense: float = 0.25
+    w_lex: float = 0.15
+
+    model_config = SettingsConfigDict(env_prefix="short_")
 
 
 class SearchMetricsEnabled(EnvBaseSettings):
     """Вывод временных метрик поиска"""
+
     log_metrics_enabled: bool = True
     response_metrics_enabled: bool = True
 
     model_config = SettingsConfigDict(env_prefix="timeit_")
 
 
+class PostgresSettings(EnvBaseSettings):
+    """Настройки Postgres"""
+
+    engine: str = "postgresql"
+    host: str
+    port: int
+    user: str
+    password: str
+    db: str
+    pool_size: int | None = None
+    pool_overflow_size: int | None = None
+    leader_usage_coefficient: float | None = None
+    use_async: bool = True
+    echo: bool = False
+    autoflush: bool = False
+    autocommit: bool = False
+    expire_on_commit: bool = False
+    engine_health_check_delay: int | None = None
+    dsn: PostgresDsn | None = None
+    slave_hosts: Sequence[str] | str = ""
+    slave_dsns: Sequence[PostgresDsn] | str = ""
+
+    @model_validator(mode="after")
+    def assemble_db_connection(self) -> tp.Self:
+        """Сборка Postgres DSN"""
+        if self.dsn is None:
+            self.dsn = str(
+                PostgresDsn.build(
+                    scheme=self.engine + "+asyncpg" if self.use_async else "",
+                    username=self.user,
+                    password=self.password,
+                    host=self.host,
+                    port=self.port,
+                    path=f"{self.db}",
+                )
+            )
+        return self
+
+    model_config = SettingsConfigDict(env_prefix="postgres_")
+
 
 class Settings(EnvBaseSettings):
     """Настройки проекта."""
 
     app: AppSettings = AppSettings()
+    database: PostgresSettings = PostgresSettings()
     milvus: MilvusSettings = MilvusSettings()
     redis: RedisSettings = RedisSettings()
     celery: CelerySettings = CelerySettings()
@@ -317,17 +399,17 @@ class Settings(EnvBaseSettings):
     llm_queue: LLMQueueSettings = LLMQueueSettings()
     llm_global_sem: LLMGlobalSemaphoreSettings = LLMGlobalSemaphoreSettings()
     opensearch: OpenSearchSettings = OpenSearchSettings()
-    bm25: BM25Settings = BM25Settings()
     reranker: RerankerSettings = RerankerSettings()
     warmup: WarmupSettings = WarmupSettings()
     switches: SearchSwitches = SearchSwitches()
     slowapi: SlowAPISettings = SlowAPISettings()
     search_metrics: SearchMetricsEnabled = SearchMetricsEnabled()
     extract_edu: ExtractEduSettings = ExtractEduSettings()
-
+    postgres: PostgresSettings = PostgresSettings()
+    short_settings: ShortSettings = ShortSettings()
 
     @model_validator(mode="after")
-    def _fill_vllm_model(self) -> Self:
+    def _fill_vllm_model(self) -> tp.Self:
         if not (getattr(self.vllm, "model", None)):
             base = getattr(self.app, "modelstore_contr_path", None)
             name = getattr(self.vllm, "model_name", None)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import time
 import typing as tp
 import uuid
 from contextlib import asynccontextmanager
@@ -11,6 +10,7 @@ from redis.asyncio import Redis
 from redis.exceptions import WatchError
 
 from app.infrastructure.adapters.interfaces import IRedisSemaphore
+from app.infrastructure.utils.metrics import _now_ms
 from app.settings.config import Settings
 
 
@@ -31,13 +31,9 @@ class RedisSemaphore(IRedisSemaphore):
         self.wait_ms = settings.llm_global_sem.wait_timeout_ms
         self.hb_ms = settings.llm_global_sem.heartbeat_ms
 
-    async def _now_ms(self) -> int:
-        """Получение текущего времени в мс"""
-        return int(time.time() * 1000)
-
     async def try_acquire(self, holder: str) -> bool:
         """Попытка захвата слота в семафоре"""
-        now = await self._now_ms()
+        now = _now_ms()
         # очистка протухших
         await self.redis.zremrangebyscore(self.key, "-inf", now)
         # оптимистичная блокировка
@@ -47,18 +43,18 @@ class RedisSemaphore(IRedisSemaphore):
                 count = await pipe.zcard(self.key) or 0
                 if count < self.limit:
                     exp = now + self.ttl_ms
-                    pipe.multi()  # type: ignore
+                    pipe.multi()
                     await pipe.zadd(self.key, {holder: exp}, nx=True)
                     await pipe.execute()
                     return True
-                await pipe.unwatch()  # type: ignore
+                await pipe.unwatch()
                 return False
             except WatchError:
                 return False
 
     async def heartbeat(self, holder: str) -> None:
         """ПРодление жизни держателя слота в семафоре"""
-        now = await self._now_ms()
+        now = _now_ms()
         exp = now + self.ttl_ms
         await self.redis.zadd(self.key, {holder: exp}, xx=True)
 
@@ -73,7 +69,7 @@ class RedisSemaphore(IRedisSemaphore):
         """Захват семафора"""
         holder = str(uuid.uuid4())
         to = self.wait_ms if timeout_ms is None else timeout_ms
-        start = await self._now_ms()
+        start = _now_ms()
         while True:
             if await self.try_acquire(holder):
                 break
@@ -82,7 +78,7 @@ class RedisSemaphore(IRedisSemaphore):
                 continue
             if to == 0:
                 raise TimeoutError("global semaphore: limit reached")
-            if (await self._now_ms()) - start >= to:
+            if _now_ms() - start >= to:
                 raise TimeoutError("global semaphore: acquire timeout")
             await asyncio.sleep(0.2)
 

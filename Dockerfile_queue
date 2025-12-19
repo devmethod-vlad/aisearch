@@ -1,11 +1,12 @@
 FROM python:3.12-slim
 
+ENV TZ=Europe/Moscow
+
 WORKDIR /backend
 
 RUN pip install --upgrade pip uv
 
-COPY buildeps/queue/pyproject.toml ./buildeps/queue/pyproject.toml
+COPY pyproject.toml ./pyproject.toml
 
-RUN uv pip compile buildeps/queue/pyproject.toml -o requirements.lock \
+RUN uv pip compile pyproject.toml -o requirements.lock --extra queue \
  && uv pip sync --system requirements.lock
-

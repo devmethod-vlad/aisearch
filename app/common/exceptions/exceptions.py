@@ -10,6 +10,18 @@ class NotFoundError(Exception):
     pass
 
 
+class AlreadyExistsError(Exception):
+    """Ошибка наличествования"""
+
+    pass
+
+
+class ConflictError(Exception):
+    """Конфликт запроса"""
+
+    pass
+
+
 class MilvusCollectionLoadTimeoutError(Exception):
     """Ошибка времени ожидания загрузки коллекции"""
 
@@ -20,7 +32,7 @@ class MilvusDeletionTimeoutError(Exception):
     """Ошибка ожидания удаления коллекци"""
 
 
-class RequestError(Exception):
+class RequestException(Exception):
     """Ошибка запроса"""
 
     pass

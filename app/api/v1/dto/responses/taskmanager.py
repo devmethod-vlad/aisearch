@@ -7,8 +7,8 @@ class TaskResponse(BaseModel):
     """Информация о задаче"""
 
     task_id: str
-    url: str
-    status: tp.Optional[str] = None
-    extra: tp.Optional[dict] = None
-    answer: tp.Optional[str] = None
+    url: str | None = None
+    status: str | None = None
+    extra: dict | None = None
+    answer: str | None = None
     info: tp.Any = None

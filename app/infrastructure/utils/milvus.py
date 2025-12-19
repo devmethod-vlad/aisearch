@@ -2,7 +2,7 @@ import json
 import typing as tp
 from dataclasses import dataclass
 
-from pymilvus import FieldSchema, DataType
+from pymilvus import DataType, FieldSchema
 
 DTYPE_MAP = {
     "BOOL": DataType.BOOL,
@@ -17,6 +17,7 @@ DTYPE_MAP = {
     "BINARY_VECTOR": DataType.BINARY_VECTOR,
 }
 
+
 @dataclass(frozen=True)
 class IndexSpec:
     field_name: str
@@ -24,14 +25,16 @@ class IndexSpec:
     metric_type: str | None = None
     params: dict[str, tp.Any] | None = None
 
-def load_schema_and_indexes_from_json(path: str) -> tuple[list[FieldSchema], list[IndexSpec], dict[str, dict[str, tp.Any]]]:
-    """
-    Возвращает (fields, indexes, search_params_by_field).
+
+def load_schema_and_indexes_from_json(
+    path: str,
+) -> tuple[list[FieldSchema], list[IndexSpec], dict[str, dict[str, tp.Any]]]:
+    """Возвращает (fields, indexes, search_params_by_field).
     - fields: список FieldSchema для CollectionSchema
     - indexes: список IndexSpec для create_index
     - search_params_by_field: мапа { field_name -> dict с поисковыми параметрами }
     """
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
 
     if "fields" not in data or not isinstance(data["fields"], list):
@@ -44,7 +47,9 @@ def load_schema_and_indexes_from_json(path: str) -> tuple[list[FieldSchema], lis
             raise ValueError(f"Поле без dtype: {raw_field}")
         dtype = DTYPE_MAP.get(dtype_str)
         if dtype is None:
-            raise ValueError(f"Неподдерживаемый dtype '{dtype_str}' в поле: {raw_field}")
+            raise ValueError(
+                f"Неподдерживаемый dtype '{dtype_str}' в поле: {raw_field}"
+            )
 
         kwargs: dict[str, tp.Any] = {
             "name": raw_field["name"],
@@ -68,10 +73,21 @@ def load_schema_and_indexes_from_json(path: str) -> tuple[list[FieldSchema], lis
         metric_type = raw_idx.get("metric_type")
         params = raw_idx.get("params") or None
         if not field_name or not index_type:
-            raise ValueError(f"Некорректный индекс (нужны field_name и index_type): {raw_idx}")
-        index_specs.append(IndexSpec(field_name=field_name, index_type=index_type, metric_type=metric_type, params=params))
+            raise ValueError(
+                f"Некорректный индекс (нужны field_name и index_type): {raw_idx}"
+            )
+        index_specs.append(
+            IndexSpec(
+                field_name=field_name,
+                index_type=index_type,
+                metric_type=metric_type,
+                params=params,
+            )
+        )
 
     # Поисковые параметры по полям (опционально)
-    search_params_by_field: dict[str, dict[str, tp.Any]] = data.get("search_params") or {}
+    search_params_by_field: dict[str, dict[str, tp.Any]] = (
+        data.get("search_params") or {}
+    )
 
     return fields, index_specs, search_params_by_field

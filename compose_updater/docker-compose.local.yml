@@ -1,0 +1,129 @@
+services:
+#  aisearch-app:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile_api
+#      args:
+#        https_proxy: ${HTTPS_PROXY_ENV}
+#        http_proxy: ${HTTP_PROXY_ENV}
+#        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+#        HTTP_PROXY: ${HTTP_PROXY_ENV}
+##    healthcheck:
+##      disable: true
+#    networks:
+#      - default
+#      - service-network
+#    command: >
+#      sh -c "
+#        exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
+#      "
+#
+#  aisearch-queue-worker:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile_queue
+#      args:
+#        https_proxy: ${HTTPS_PROXY_ENV}
+#        http_proxy: ${HTTP_PROXY_ENV}
+#        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+#        HTTP_PROXY: ${HTTP_PROXY_ENV}
+#    networks:
+#      - default
+#      - service-network
+#
+#  aisearch-celery-worker:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile_search_main
+#      args:
+#        https_proxy: ${HTTPS_PROXY_ENV}
+#        http_proxy: ${HTTP_PROXY_ENV}
+#        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+#        HTTP_PROXY: ${HTTP_PROXY_ENV}
+#        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+#        REGISTRY: ${REGISTRY}
+#    networks:
+#      - default
+#      - service-network
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [ gpu ]
+
+  aisearch-etcd:
+    networks:
+      - default
+
+  aisearch-minio:
+    networks:
+      - default
+
+  aisearch-milvus:
+    networks:
+      - default
+
+  attu:
+    image: zilliz/attu:v2.5.0
+    container_name: aisearch-attu
+    ports:
+      - 8010:3000
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+    networks:
+      - default
+
+  aisearch-opensearch:
+    networks:
+      - default
+
+  aisearch-os-dashboards:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    container_name: aisearch-os-dashboards
+    environment:
+      OPENSEARCH_HOSTS: '["http://aisearch-opensearch:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
+    ports:
+      - "5601:5601"
+    depends_on:
+      aisearch-opensearch:
+        condition: service_healthy
+    networks:
+      - default
+
+  aisearch-updater:
+    networks:
+      - default
+      - service-network
+    build:
+      context: .
+      dockerfile: Dockerfile_search_main
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+#  aisearch-vllm:
+#    networks:
+#      - default
+
+networks:
+  default:
+    driver: bridge
+
+  service-network:
+    name: service-network
+    external: true

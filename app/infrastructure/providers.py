@@ -2,9 +2,7 @@ import redis.asyncio as redis
 from dishka import Provider, Scope, from_context, provide
 
 from app.common.logger import AISearchLogger, LoggerType
-
 from app.settings.config import RedisSettings
-
 
 
 class LoggerProvider(Provider):
@@ -25,5 +23,5 @@ class RedisProvider(Provider):
     def redis_client(self, redis_settings: RedisSettings) -> redis.Redis:
         """Получение клиента Redis."""
         dsn = str(redis_settings.dsn)
-        connection = redis.from_url(dsn)  # type: ignore
+        connection = redis.from_url(dsn)
         return connection.client()

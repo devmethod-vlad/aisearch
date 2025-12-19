@@ -8,10 +8,11 @@ services:
         http_proxy: ${HTTP_PROXY_ENV}
         HTTPS_PROXY: ${HTTPS_PROXY_ENV}
         HTTP_PROXY: ${HTTP_PROXY_ENV}
-    healthcheck:
-      disable: true
+    # healthcheck:
+    #   disable: true
     command: >
       sh -c "
+        /backend/scripts/wait_for_services.sh $$APP_LOGS_PATH &&
         exec uvicorn app.main:app --host ${APP_HOST} --port ${APP_PORT} --reload
       "
 
@@ -102,3 +103,21 @@ services:
     depends_on:
       aisearch-milvus:
         condition: service_healthy
+
+  postgres:
+    container_name: aisearch-db
+    image: postgres:13.4
+    env_file:
+      - .env
+    ports:
+      - ${POSTGRES_PORT}:${POSTGRES_PORT}
+    volumes:
+      - ${POSTGRES_VOLUME_HOST_PATH}/:${POSTGRES_VOLUME_CONTR_PATH}/
+
+  pgadmin:
+    container_name: aisearch-pgadmin
+    image: dpage/pgadmin4
+    env_file:
+      - .env
+    ports:
+      - ${PGADMIN_PORT}:80

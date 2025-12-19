@@ -12,3 +12,7 @@ class QueueMaxSizeException(DomainException):
 
 class TooManyRequestsException(DomainException):
     """Ошибка частых запросов"""
+
+
+class FeedbackException(DomainException):
+    """Ошибка обратной связи"""

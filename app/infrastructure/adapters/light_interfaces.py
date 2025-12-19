@@ -1,6 +1,7 @@
 import abc
 import typing as tp
 
+
 class ILLMQueue(abc.ABC):
     """Интерфейс очереди"""
 
@@ -29,7 +30,9 @@ class ILLMQueue(abc.ABC):
         """Получение статуса задачи"""
 
     @abc.abstractmethod
-    async def dequeue_blocking(self, timeout: float = 0.2) -> tuple[str, dict[str, tp.Any]] | None:
+    async def dequeue_blocking(
+        self, timeout: float = 0.2
+    ) -> tuple[str, dict[str, tp.Any]] | None:
         """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
 
     @abc.abstractmethod

@@ -30,10 +30,10 @@ class VLLMAdapter(IVLLMAdapter):
         system_prompt: str,
         user_prompt: str,
         *,
-        max_tokens: tp.Optional[int] = None,
-        temperature: tp.Optional[float] = None,
-        top_p: tp.Optional[float] = None,
-        extra: tp.Optional[dict[str, tp.Any]] = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        extra: dict[str, tp.Any] | None = None,
     ) -> str:
         """Асинхронное обращение к модели"""
         payload: dict[str, tp.Any] = {
@@ -44,7 +44,9 @@ class VLLMAdapter(IVLLMAdapter):
             ],
             "max_tokens": max_tokens or self.settings.vllm.max_output_tokens,
             "temperature": (
-                temperature if temperature is not None else self.settings.vllm.temperature
+                temperature
+                if temperature is not None
+                else self.settings.vllm.temperature
             ),
             "top_p": top_p if top_p is not None else self.settings.vllm.top_p,
             "stream": self.settings.vllm.stream,
@@ -55,7 +57,9 @@ class VLLMAdapter(IVLLMAdapter):
             r = await self._client.post("/chat/completions", json=payload)
             r.raise_for_status()
         except httpx.HTTPStatusError as e:
-            self.log.error(f"vLLM request failed: {e.response.status_code} {e.response.text}")
+            self.log.error(
+                f"vLLM request failed: {e.response.status_code} {e.response.text}"
+            )
             raise
         data = r.json()
         return data["choices"][0]["message"]["content"]

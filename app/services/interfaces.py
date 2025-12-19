@@ -1,8 +1,24 @@
 import abc
+import logging
 import typing as tp
-from typing import Optional
+from abc import ABC, abstractmethod
 
-
+from app.api.v1.dto.requests.feedback import (
+    KnowledgeFeedbackBulkCreateRequest,
+    KnowledgeFeedbackCreateRequest,
+    KnowledgeFeedbackQueryRequest,
+    SearchFeedbackBulkCreateRequest,
+    SearchFeedbackCreateRequest,
+    SearchFeedbackQueryRequest,
+    SearchRequestQueryRequest,
+)
+from app.api.v1.dto.responses.feedback import (
+    FeedbackBulkCreateResponse,
+    FeedbackCreateResponse,
+    KnowledgeFeedbacksResponse,
+    SearchFeedbacksResponse,
+    SearchRequestsResponse,
+)
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 
 
@@ -24,7 +40,7 @@ class IHybridSearchService(abc.ABC):
 
     @abc.abstractmethod
     async def enqueue_generate(
-        self, query: str, top_k: int, system_prompt: Optional[str]
+        self, query: str, top_k: int, system_prompt: str | None
     ) -> TaskResponse:
         """Постановка задачи генерации в очередь"""
         pass
@@ -37,6 +53,10 @@ class IHybridSearchService(abc.ABC):
 
 class IHybridSearchOrchestrator(abc.ABC):
     """Оркестратор гибридного поиска"""
+
+    @abc.abstractmethod
+    def set_logger(self, logger: logging.Logger) -> None:
+        """Переопределение логгера"""
 
     @abc.abstractmethod
     async def documents_search(
@@ -52,13 +72,64 @@ class IHybridSearchOrchestrator(abc.ABC):
     async def warmup(self) -> bool:
         """Прогрев"""
 
+
 class IUpdaterService(abc.ABC):
     """Обновляет бд из внешних источников"""
 
     @abc.abstractmethod
-    async def update_vio_base(self):
+    async def update_vio_base(self) -> None:
         """Обновление данных из VIO"""
 
     @abc.abstractmethod
-    async def update_kb_base(self):
+    async def update_kb_base(self) -> None:
         """Обновление данных из KB"""
+
+    @abc.abstractmethod
+    async def update_all(self) -> None:
+        """Обновление всех источников"""
+
+
+class IFeedbackService(ABC):
+    """Интерфейс сервиса обратной связи"""
+
+    @abstractmethod
+    async def create_search_feedback(
+        self, request: SearchFeedbackCreateRequest
+    ) -> FeedbackCreateResponse:
+        """Создание обратной связи по результату поиска"""
+
+    @abstractmethod
+    async def create_knowledge_feedback(
+        self, request: KnowledgeFeedbackCreateRequest
+    ) -> FeedbackCreateResponse:
+        """Создание оценки знания"""
+
+    @abstractmethod
+    async def bulk_create_search_feedback(
+        self, request: SearchFeedbackBulkCreateRequest
+    ) -> FeedbackBulkCreateResponse:
+        """Массовое создание обратной связи по поиску"""
+
+    @abstractmethod
+    async def bulk_create_knowledge_feedback(
+        self, request: KnowledgeFeedbackBulkCreateRequest
+    ) -> FeedbackBulkCreateResponse:
+        """Массовое создание оценки знания"""
+
+    @abstractmethod
+    async def get_search_requests(
+        self, request: SearchRequestQueryRequest
+    ) -> SearchRequestsResponse:
+        """Получение search_request с пагинацией и фильтрацией по времени"""
+
+    @abstractmethod
+    async def get_search_feedbacks(
+        self, request: SearchFeedbackQueryRequest
+    ) -> SearchFeedbacksResponse:
+        """Получение search_feedback с пагинацией и фильтрацией по времени"""
+
+    @abstractmethod
+    async def get_knowledge_feedbacks(
+        self, request: KnowledgeFeedbackQueryRequest
+    ) -> KnowledgeFeedbacksResponse:
+        """Получение knowledge_feedback с пагинацией и фильтрацией по времени"""

@@ -7,8 +7,9 @@ import typing as tp
 from redis import WatchError
 from redis.asyncio import Redis
 
-from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.common.logger import AISearchLogger
+from app.infrastructure.adapters.light_interfaces import ILLMQueue
+from app.infrastructure.utils.metrics import _now_ms
 from app.settings.config import Settings
 
 
@@ -33,12 +34,15 @@ class LLMQueue(ILLMQueue):
         hkey = f"{self.tprefix}{ticket_id}"
         async with self.redis.pipeline() as pipe:
             # Обновляем статус и метаданные
-            await pipe.hset(hkey, mapping={
-                "state": "queued",
-                "task_id": "",
-                "error": reason or "",
-                "updated_at": now,
-            })
+            await pipe.hset(
+                hkey,
+                mapping={
+                    "state": "queued",
+                    "task_id": "",
+                    "error": reason or "",
+                    "updated_at": now,
+                },
+            )
             await pipe.lrem(self.pkey, 1, ticket_id)
             await pipe.rpush(self.qkey, ticket_id)
             await pipe.execute()
@@ -47,6 +51,7 @@ class LLMQueue(ILLMQueue):
         """Постановка задачи в очередь с учётом позиции и защиты от переполнения."""
         ticket_id = payload["ticket_id"]
         now = int(time.time())
+        now_ms = _now_ms()
         hkey = f"{self.tprefix}{ticket_id}"
         data = {
             "state": "queued",
@@ -55,6 +60,7 @@ class LLMQueue(ILLMQueue):
             "payload": json.dumps(payload, ensure_ascii=False),
             "task_id": "",
             "error": "",
+            "queued_at_ms": now_ms,
         }
 
         while True:
@@ -69,11 +75,13 @@ class LLMQueue(ILLMQueue):
                     total_len = queued_len + processing_len
 
                     if total_len >= self.max_size:
-                        await pipe.unwatch()  # type: ignore
-                        raise OverflowError(f"LLM queue overflow: {total_len}/{self.max_size}")
+                        await pipe.unwatch()
+                        raise OverflowError(
+                            f"LLM queue overflow: {total_len}/{self.max_size}"
+                        )
 
                     # Начинаем транзакцию
-                    pipe.multi()  # type: ignore
+                    pipe.multi()
                     # Записываем мета по тикету
                     await pipe.hset(hkey, mapping=data)
                     await pipe.expire(hkey, self.ticket_ttl)
@@ -95,13 +103,18 @@ class LLMQueue(ILLMQueue):
         """Установка задачи в статус running"""
         await self.redis.hset(
             f"{self.tprefix}{ticket_id}",
-            mapping={"state": "running", "task_id": task_id, "updated_at": int(time.time())},
+            mapping={
+                "state": "running",
+                "task_id": task_id,
+                "updated_at": int(time.time()),
+            },
         )
 
     async def set_done(self, ticket_id: str) -> None:
         """Установка задачи в статус done"""
         await self.redis.hset(
-            f"{self.tprefix}{ticket_id}", mapping={"state": "done", "updated_at": int(time.time())}
+            f"{self.tprefix}{ticket_id}",
+            mapping={"state": "done", "updated_at": int(time.time())},
         )
 
     async def set_failed(self, ticket_id: str, error: str) -> None:
@@ -126,7 +139,9 @@ class LLMQueue(ILLMQueue):
             return ticket_id, {}
 
         payload = (
-            json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+            json.loads(raw.decode())
+            if isinstance(raw, (bytes, bytearray))
+            else json.loads(raw)
         )
         return ticket_id, payload
 
@@ -149,24 +164,33 @@ class LLMQueue(ILLMQueue):
         data["approx_position"] = pos
         return data
 
-    async def dequeue_blocking(self, timeout: float = 0.2) -> tuple[str, dict[str, tp.Any]] | None:
+    async def dequeue_blocking(
+        self, timeout: float = 0.2
+    ) -> tuple[str, dict[str, tp.Any]] | None:
         """Атомарно: BRPOPLPUSH main -> processing и возврат payload"""
-
         raw_tid = await self.redis.brpoplpush(self.qkey, self.pkey, timeout=timeout)
         if not raw_tid:
             return None
 
-        ticket_id = raw_tid.decode() if isinstance(raw_tid, (bytes, bytearray)) else str(raw_tid)
+        ticket_id = (
+            raw_tid.decode()
+            if isinstance(raw_tid, (bytes, bytearray))
+            else str(raw_tid)
+        )
 
         hkey = f"{self.tprefix}{ticket_id}"
         now = int(time.time())
-        await self.redis.hset(hkey, mapping={"updated_at": now}) # добавил обновление по времени из main -> processing
+        await self.redis.hset(
+            hkey, mapping={"updated_at": now}
+        )  # добавил обновление по времени из main -> processing
 
         raw = await self.redis.hget(hkey, "payload")
         if raw is None:
             return ticket_id, {}
         payload = (
-            json.loads(raw.decode()) if isinstance(raw, (bytes, bytearray)) else json.loads(raw)
+            json.loads(raw.decode())
+            if isinstance(raw, (bytes, bytearray))
+            else json.loads(raw)
         )
         return ticket_id, payload
 
@@ -175,8 +199,7 @@ class LLMQueue(ILLMQueue):
         await self.redis.lrem(self.pkey, 1, ticket_id)
 
     async def sweep_processing(self, stale_sec: int = 60) -> int:
-        """
-        Возвращает в основную очередь тикеты, застрявшие в processing дольше stale_sec
+        """Возвращает в основную очередь тикеты, застрявшие в processing дольше stale_sec
         Если хэш исчез — просто удаляем из processing.
         """
         now = int(time.time())
@@ -184,20 +207,26 @@ class LLMQueue(ILLMQueue):
         requeued = 0
 
         for raw in ids:
-            ticket_id = raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            ticket_id = (
+                raw.decode() if isinstance(raw, (bytes, bytearray)) else str(raw)
+            )
             hkey = f"{self.tprefix}{ticket_id}"
             data = await self.redis.hgetall(hkey)
 
             if not data:
                 # Хэш пропал/протух — очистим processing
                 await self.redis.lrem(self.pkey, 1, ticket_id)
-                self.logger.warning(f"🚨 В ходе проверке не найден хэш {hkey}. Удаляем {self.pkey} из processig")
+                self.logger.warning(
+                    f"🚨 В ходе проверке не найден хэш {hkey}. Удаляем {self.pkey} из processig"
+                )
                 continue
 
             # Вспомогательный декодер
             def _get(k: bytes, default: str = "") -> str:
-                v = data.get(k)
-                return v.decode() if isinstance(v, (bytes, bytearray)) else (v or default)
+                v = data.get(k)  # noqa: B023
+                return (
+                    v.decode() if isinstance(v, (bytes, bytearray)) else (v or default)
+                )
 
             state = _get(b"state")
             try:
@@ -207,7 +236,9 @@ class LLMQueue(ILLMQueue):
 
             # Реальные «подвисшие» состояния — queued/running без движения
             if state in {"queued", "failed"} and now - updated_at >= stale_sec:
-                self.logger.warning(f"🚨 Найден повисший тикет {ticket_id} в статусе {state}. Переставляем из processing в queue")
+                self.logger.warning(
+                    f"🚨 Найден повисший тикет {ticket_id} в статусе {state}. Переставляем из processing в queue"
+                )
                 await self.requeue(ticket_id, reason="sweep: stale in processing")
                 requeued += 1
 

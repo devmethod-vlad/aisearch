@@ -3,7 +3,6 @@ from celery.result import AsyncResult
 from app.api.v1.dto.responses.taskmanager import TaskResponse
 from app.common.logger import AISearchLogger
 from app.common.storages.interfaces import KeyValueStorageProtocol
-
 from app.services.interfaces import ITaskManagerService
 from app.settings.config import RedisSettings
 

@@ -1,5 +1,4 @@
 from dishka.integrations.fastapi import FromDishka, inject
-from fastapi import APIRouter
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from slowapi import Limiter
@@ -8,12 +7,13 @@ from starlette.requests import Request
 
 from app.api.v1.dto.requests.search import SearchRequest
 from app.api.v1.dto.responses.taskmanager import TaskResponse
+from app.common.fastapi_utils import TolerantAPIRouter
 from app.services.interfaces import IHybridSearchService
 from app.settings.config import settings
 
 limiter = Limiter(key_func=get_remote_address)
 
-router = APIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
+router = TolerantAPIRouter(prefix="/hybrid-search", tags=["Hybrid Search"])
 
 
 @router.post("/search", response_model=TaskResponse)
@@ -28,23 +28,26 @@ async def get_documents(
     query = body.query
     top_k = body.top_k
     response = await service.enqueue_search(query=query, top_k=top_k)
-    print("search response: \n", response)
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 
 
-@router.post("/generate", response_model=TaskResponse)
-@limiter.limit(settings.slowapi.generate, key_func=get_remote_address)
-@inject
-async def generate_answer(
-    request: Request,
-    query: str,
-    top_k: int = 5,
-    system_prompt: str | None = None,
-    service: FromDishka[IHybridSearchService] = None,
-) -> JSONResponse:
-    """Генерирует ответ. Ставит задачу в очередь и возвращает ticket_id."""
-    response = await service.enqueue_generate(query=query, top_k=top_k, system_prompt=system_prompt)
-    return JSONResponse(content=jsonable_encoder(response, exclude_none=True), status_code=202)
+# @router.post("/generate", response_model=TaskResponse)
+# @limiter.limit(settings.slowapi.generate, key_func=get_remote_address)
+# @inject
+# async def generate_answer(
+#     request: Request,
+#     query: str,
+#     top_k: int = 5,
+#     system_prompt: str | None = None,
+#     service: FromDishka[IHybridSearchService] = None,
+# ) -> JSONResponse:
+#     """Генерирует ответ. Ставит задачу в очередь и возвращает ticket_id."""
+#     response = await service.enqueue_generate(
+#         query=query, top_k=top_k, system_prompt=system_prompt
+#     )
+#     return JSONResponse(
+#         content=jsonable_encoder(response, exclude_none=True), status_code=202
+#     )
 
 
 @router.get("/info/{ticket_id}", response_model=TaskResponse)
@@ -55,5 +58,6 @@ async def get_task_status(
 ) -> JSONResponse:
     """Проверяет статус задачи по ticket_id."""
     response = await service.get_task_status(ticket_id)
-    print("info response: \n", response)
-    return JSONResponse(content=jsonable_encoder(response, exclude_none=True), status_code=200)
+    return JSONResponse(
+        content=jsonable_encoder(response, exclude_none=True), status_code=200
+    )
