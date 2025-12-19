@@ -190,34 +190,34 @@ services:
       timeout: 5s
       retries: 30
 
-#  aisearch-updater:
-#    container_name: aisearch-updater
-#    command: >
-#      sh -c "
-#        /backend/scripts/wait_for_services.sh $$EXTRACT_LOGS_PATH &&
-#        exec python3 -m app.scheduler
-#      "
-#    volumes:
-#      - ./:/backend
-#      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-#      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
-#      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
-#      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
-#    env_file:
-#      - .env
-#    environment:
-#      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
-#      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
-#      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
-#      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
-#      - EXTRACT_LOGS_PATH=${LOGS_CONTR_DIR}/${EXTRACT_LOGS_LOCATION}
-#    depends_on:
-#      aisearch-milvus:
-#        condition: service_healthy
-#        restart: true
-#      aisearch-opensearch:
-#        condition: service_started
-#        restart: true
+  aisearch-updater:
+    container_name: aisearch-updater
+    command: >
+      sh -c "
+        /backend/scripts/wait_for_services.sh $$EXTRACT_LOGS_PATH &&
+        exec python3 -m app.scheduler
+      "
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - EXTRACT_LOGS_PATH=${LOGS_CONTR_DIR}/${EXTRACT_LOGS_LOCATION}
+    depends_on:
+      aisearch-milvus:
+        condition: service_healthy
+        restart: true
+      aisearch-opensearch:
+        condition: service_started
+        restart: true
 
 #  aisearch-vllm:
 #    image: vllm/vllm-openai:latest
