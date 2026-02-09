@@ -1,6 +1,6 @@
 ARG IMAGE_NAME_DEPS=aisearch-deps-base:latest
 ARG REGISTRY=localhost:5001
-FROM ${REGISTRY}/${IMAGE_NAME_DEPS}
+FROM ${REGISTRY}/${IMAGE_NAME_DEPS} as base
 
 ARG https_proxy
 ARG http_proxy
@@ -13,6 +13,17 @@ ENV http_proxy=${http_proxy} https_proxy=${https_proxy}\
 WORKDIR /backend
 
 COPY pyproject.toml ./pyproject.toml
+
+FROM base AS dev
+
+RUN uv pip compile pyproject.toml -o requirements.lock --extra search --extra dev \
+ && uv pip sync --system requirements.lock
+
+ENV  http_proxy=''  https_proxy='' \
+     HTTP_PROXY='' HTTPS_PROXY='' \
+     PYTHONPATH=/backend
+
+FROM base AS prod
 
 RUN uv pip compile pyproject.toml -o requirements.lock --extra search \
  && uv pip sync --system requirements.lock

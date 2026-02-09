@@ -41,10 +41,6 @@ class IVectorDatabase(abc.ABC):
         """Удаление коллекции."""
 
     @abc.abstractmethod
-    async def safe_delete_collection(self, collection_name: str) -> None:
-        """Удаление коллекции с попытками"""
-
-    @abc.abstractmethod
     async def preload_collections(self) -> None:
         """Предзагрузка коллекций в память"""
 

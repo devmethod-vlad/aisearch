@@ -1,5 +1,5 @@
 # Семантический поиск
-dfdfd
+
 <p>
     <a href="https://fastapi.tiangolo.com"><img alt="" src="https://img.shields.io/badge/FastAPI-009688.svg?style=flat&logo=FastAPI&logoColor=white"></a>
     <a href="https://milvus.io/"><img alt="" src="https://img.shields.io/badge/Milvus-00B7EB"></a>
@@ -42,7 +42,13 @@ dfdfd
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
     APP_NORMALIZE_QUERY=true # Нормализовать ли запрос
-    APP_COLLECTION_FILE_PATH=kb_default.parquet
+    APP_COLLECTION_FILES_HOST_DIR=./volumes/collections
+    APP_COLLECTION_FILES_CONTR_DIR=/collections
+    APP_DATA_UNIQUE_ID=ext_id
+    APP_RECREATE_DATA=true
+    APP_GENERATE_PRELAUNCH_DATA=true
+    APP_PRELAUNCH_DATA_HOST_DIR=./volumes/prelaunch
+    APP_PRELAUNCH_DATA_CONTR_DIR=/prelaunch
 
     ETCD_AUTO_COMPACTION_MODE=revision # periodic
     ETCD_AUTO_COMPACTION_RETENTION=1000 # time, like "1h"
@@ -70,7 +76,6 @@ dfdfd
     MILVUS_QUERY_TIMEOUT=30
     MILVUS_METRIC_TYPE=IP
     MILVUS_COLLECTION_NAME=kb_default
-    MILVUS_RECREATE_COLLECTION=false
     MILVUS_VECTOR_FIELD=embedding
     MILVUS_ID_FIELD=pk
     MILVUS_SEARCH_FIELDS=question
@@ -134,7 +139,6 @@ dfdfd
     OS_USE_RESCORE=false
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000
-    OS_RECREATE_INDEX=true
     OS_SCHEMA_PATH=app/settings/os_index.json
     OS_VOLUME_HOST_PATH=./volumes/opensearch-data
     OS_VOLUME_CONTR_PATH=/usr/share/opensearch/data
@@ -196,7 +200,7 @@ dfdfd
     TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
 
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
-    # EXTRACT_EDU_EMIAS_TOKEN=""
+    EXTRACT_EDU_EMIAS_TOKEN=""
     EXTRACT_EDU_EMIAS_ATTACHMENTS_PAGE_ID=223792475
     EXTRACT_EDU_TIMEOUT=20
     EXTRACT_KNOWLEDGE_BASE_FILE_NAME="KB_wiki.xlsx"
@@ -311,6 +315,10 @@ dfdfd
 ```
 uv pip compile pyproject.toml --extra api --extra search --extra queue --extra dev -o requirements.txt && uv pip sync requirements.txt --system && del requirements.txt
 ```
+или
+```
+uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 && uv pip compile pyproject.toml --extra api --extra search --extra queue --extra dev -o requirements.txt && uv pip sync requirements.txt && del requirements.txt
+```
 ## Сборка Dockerfile_search_base + Dockerfile_search_deps + Dockerfile_search_main (Windows, cmd)
 Поднимать локальный registry c
 ```
@@ -344,4 +352,9 @@ bashrc && source ~/.bashrc
 Проверить
 ```
 nvcc --version
+```
+## Запуск pre_launch только для экспорта данных
+Запустить pre_launch.py в контейнере aisearch-celery-worker
+```
+python3 pre_launch.py --export-only
 ```

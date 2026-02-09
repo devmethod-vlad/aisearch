@@ -14,6 +14,7 @@ from app.infrastructure.utils.process import (
     get_process_absolute_starttime,
     get_worker_process_keys,
 )
+from app.infrastructure.utils.universal import get_timezone
 from app.settings.config import settings
 
 
@@ -44,7 +45,7 @@ def setup_logger() -> logging.Logger:
 
     class CustomFormatter(logging.Formatter):
         def format(self, record: logging.LogRecord) -> str:
-            timestamp = datetime.datetime.now(tz=datetime.UTC).strftime(
+            timestamp = datetime.datetime.now(tz=get_timezone()).strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
             level = record.levelname

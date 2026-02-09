@@ -3,7 +3,14 @@ import functools
 import gc
 import importlib
 import logging
+import os
+import sys
 import typing as tp
+from datetime import timezone
+
+import pytz
+from dotenv import load_dotenv
+from pydantic import BaseModel
 
 
 def cleanup_resources(
@@ -87,3 +94,60 @@ def async_retry(
         return wrapper
 
     return decorator
+
+
+@tp.no_type_check
+def get_system_root() -> str:
+    """Возвращает SYSTEMROOT из переменных окружения"""
+    if sys.platform == "win32":
+        load_dotenv()
+        return os.environ.get("SYSTEMROOT", "C:\\Windows")
+    return ""
+
+
+def settings_to_env_vars(settings_obj: BaseModel) -> dict[str, str]:
+    """Универсальное преобразование Settings в переменные окружения.
+    Автоматически использует env_prefix из model_config.
+    """
+    env_vars = {}
+
+    for field_name, field_info in settings_obj.model_fields.items():
+        value = getattr(settings_obj, field_name)
+
+        if field_name.startswith("_"):
+            continue
+
+        model_config = getattr(type(settings_obj), "model_config", {})
+        prefix = ""
+
+        if isinstance(model_config, dict) or hasattr(model_config, "get"):
+            prefix = model_config.get("env_prefix", "")
+
+        if isinstance(value, BaseModel):
+            nested_vars = settings_to_env_vars(value)
+
+            for nested_key, nested_value in nested_vars.items():
+                env_vars[nested_key] = nested_value
+
+        elif value is not None:
+            var_name = f"{prefix.upper()}{field_name.upper()}"
+
+            if isinstance(value, bool):
+                env_vars[var_name] = "true" if value else "false"
+            elif isinstance(value, (list, tuple)):
+                env_vars[var_name] = ",".join(str(item) for item in value)
+            else:
+                env_vars[var_name] = str(value)
+
+    return env_vars
+
+
+def exit_with_error(logger: logging.Logger, text: str, code: int = 1) -> None:
+    """Завершить работу скрипта с ошибкой"""
+    logger.error(text)
+    logger.info(f"Завершение pre_launch ({code})")
+    sys.exit(code)
+
+
+def get_timezone() -> timezone:
+    return pytz.timezone(os.environ.get("TZ", "Europe/Moscow"))

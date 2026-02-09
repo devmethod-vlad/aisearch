@@ -51,7 +51,7 @@ async def update_all_sources(
         await service.update_all()
         logger.info("✅ Обновление источников завершено")
     else:
-        logger.warning("⚠️ Обновление источников не было завершено")
+        logger.error("⚠️ Обновление источников не было завершено")
 
 
 async def main() -> None:
@@ -93,8 +93,8 @@ async def main() -> None:
         scheduler.add_job(
             update_all_sources,
             "cron",
-            hour=23,
-            minute=6,
+            hour=hour,
+            minute=minute,
             args=(service, edu_adapter, logger),
             name=task_name,
             id=task_name,

@@ -17,6 +17,5 @@ __pycache__
 /tests/tmp
 celerybeat-schedule
 poetry.lock
-*.xlsx
 /nltk/
 /models/

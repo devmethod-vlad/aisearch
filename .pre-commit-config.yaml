@@ -13,14 +13,15 @@ repos:
         exclude: ^app/infrastructure/migrations/
       - id: check-yaml
       - id: check-added-large-files
+        args: ['--maxkb=2048']
       - id: check-merge-conflict
   - repo: https://github.com/psf/black
-    rev: '25.12.0'
+    rev: '26.1.0'
     hooks:
       - id: black
         exclude: ^app/infrastructure/migrations/
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.9
+    rev: v0.14.14
     hooks:
     - id: ruff
       args: [--fix, --exit-non-zero-on-fix]

@@ -50,34 +50,46 @@ class IVLLMAdapter(abc.ABC):
 
 
 class IOpenSearchAdapter(abc.ABC):
-    """Адаптер OpenSearch"""
+    """Интерфейс для работы с OpenSearch"""
 
     @abc.abstractmethod
-    def build_index(self, data: list[dict[str, tp.Any]]) -> None:
-        """Построение индекса"""
+    async def index_exists(self, index_name: str | None = None) -> bool:
+        """Проверяет существование индекса"""
 
     @abc.abstractmethod
-    def search(self, body: dict, size: int) -> list[dict]:
-        """Поиск opensearch"""
+    async def delete_index(self, index_name: str | None = None) -> bool:
+        """Удаляет индекс. Возвращает True если индекс был удален"""
 
     @abc.abstractmethod
-    def fetch_existing(self, size: int = 10000) -> list[dict[str, tp.Any]]:
+    async def create_index(self, index_name: str | None = None) -> bool:
+        """Создает индекс с текущей схемой. Возвращает True если индекс был создан"""
+
+    @abc.abstractmethod
+    async def build_index_with_data(self, data: list[dict[str, tp.Any]]) -> None:
+        """Загружает данные в индекс (предполагает, что индекс уже создан)"""
+
+    @abc.abstractmethod
+    async def search(self, body: dict, size: int) -> list[dict]:
+        """Поиск в индексе"""
+
+    @abc.abstractmethod
+    async def upsert(self, data: list[dict[str, tp.Any]]) -> None:
+        """Upsert документов в OpenSearch"""
+
+    @abc.abstractmethod
+    async def fetch_existing(self, size: int = 10000) -> list[dict[str, tp.Any]]:
         """Получить все документы из индекса OpenSearch"""
 
     @abc.abstractmethod
-    def upsert(self, data: list[dict[str, tp.Any]]) -> None:
-        """Upsert документов в OpenSearch (обновляет или добавляет)"""
+    async def delete(self, ext_ids: list[str]) -> None:
+        """Удаляет документы из OpenSearch по полю ext_id."""
 
     @abc.abstractmethod
-    def delete(self, ext_ids: list[str]) -> None:
-        """Удаляет документы из OpenSearch по ext_id"""
+    async def count(self) -> int:
+        """Возвращает количество документов в индексе OpenSearch."""
 
     @abc.abstractmethod
-    def ensure_index_not_empty(self) -> None:
-        """Проверяет, что индекс существует и содержит хотя бы 1 документ."""
-
-    @abc.abstractmethod
-    def ids_exist_by_source_field(
+    async def ids_exist_by_source_field(
         self,
         incoming_ext_ids: tp.Iterable[tp.Any],
         source: str = None,
@@ -93,7 +105,7 @@ class IOpenSearchAdapter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def delete_by_ext_ids(
+    async def delete_by_ext_ids(
         self,
         ext_ids: list[str],
         field: str = "ext_id",
@@ -106,7 +118,7 @@ class IOpenSearchAdapter(abc.ABC):
         """
 
     @abc.abstractmethod
-    def diff_modified_by_ext_ids(
+    async def diff_modified_by_ext_ids(
         self,
         incoming_modified: dict[str, str],
         *,
@@ -119,6 +131,10 @@ class IOpenSearchAdapter(abc.ABC):
         """Вернёт список ext_id, у которых modified_at в индексе OpenSearch отличается
         от входящего значения.
         """
+
+    @abc.abstractmethod
+    async def close(self) -> None:
+        """Закрытие соединения с клиентом."""
 
 
 class ICrossEncoderAdapter(abc.ABC):

@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from sentence_transformers import CrossEncoder
 
+from app.common.exceptions.exceptions import NoCudaException
 from app.infrastructure.adapters.interfaces import ICrossEncoderAdapter
 from app.infrastructure.utils.metrics import metrics_print
 from app.settings.config import Settings
@@ -56,7 +57,10 @@ class CrossEncoderAdapter(ICrossEncoderAdapter):
         max_length = self.settings.reranker.max_length or 192
         dtype = self.settings.reranker.dtype or "fp16"
 
-        dev = torch.device(device if torch.cuda.is_available() else "cpu")
+        if not torch.cuda.is_available():
+            raise NoCudaException
+
+        dev = torch.device(device)
         mdl.eval().to(dev)
 
         torch.backends.cuda.matmul.allow_tf32 = True

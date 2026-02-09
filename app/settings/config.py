@@ -36,7 +36,14 @@ class AppSettings(EnvBaseSettings):
     log_level: str = "INFO"
 
     normalize_query: bool
-    collection_file_path: str
+    collection_files_contr_dir: str = "/collections"
+    field_mapping_schema_path: str = "app/settings/field_mapping.json"
+
+    data_unique_id: str = "ext_id"
+    recreate_data: bool = False
+
+    generate_prelaunch_data: bool = False
+    prelaunch_data_contr_dir: str = "/prelaunch"
 
     model_config = SettingsConfigDict(env_prefix="app_")
 
@@ -52,7 +59,6 @@ class MilvusSettings(EnvBaseSettings):
     query_timeout: int
     collection_name: str
     model_name: str
-    recreate_collection: bool = False
     vector_field: str = "embedding"
     schema_path: str = "app/settings/conf.json"
     id_field: str = "ext_id"
@@ -205,7 +211,6 @@ class OpenSearchSettings(EnvBaseSettings):
     index_answer: bool = True
     schema_path: str = "app/settings/os_index.json"
     bulk_chunk_size: int = 1000
-    recreate_index: bool = True
     model_config = SettingsConfigDict(env_prefix="os_")
 
     @model_validator(mode="after")
@@ -236,7 +241,7 @@ class RerankerSettings(EnvBaseSettings):
     """Cross Encoder настройки"""
 
     model_name: str
-    device: str = "cpu"
+    device: str = "cuda"
     batch_size: int = 128
     max_length: int = 192
     score_mode: str = "sigmoid"

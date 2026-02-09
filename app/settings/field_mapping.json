@@ -1,0 +1,20 @@
+{
+    "Источник": "source",
+    "ID": "ext_id",
+    "ID страницы": "page_id",
+    "Актуально": "actual",
+    "2 линия": "second_line",
+    "Роль": "role",
+    "Продукт": "product",
+    "Пространство": "space",
+    "Компонент": "component",
+    "Вопрос (markdown)": "question_md",
+    "Вопрос (clean)": "question",
+    "Анализ ошибки (markdown)": "analysis_md",
+    "Анализ ошибки (clean)": "analysis",
+    "Ответ (markdown)": "answer_md",
+    "Ответ (clean)": "answer",
+    "Для пользователя": "for_user",
+    "Jira": "jira",
+    "Обновлено": "modified_at"
+}

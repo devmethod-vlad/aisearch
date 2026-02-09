@@ -2,7 +2,7 @@ default:
   tags:
     - aisearch
 stages:
-#  - lint
+  - lint
   - deploy
 
 variables:
@@ -14,26 +14,26 @@ variables:
   NO_PROXY: "git.emias.mos.ru, docker,127.0.0.1,localhost"
   no_proxy: "git.emias.mos.ru, docker,127.0.0.1,localhost"
 
-#lint:
-#  stage: lint
-#  image: python:3.12-slim
-#  variables:
-#    HTTP_PROXY: "http://10.0.20.6:80"
-#    HTTPS_PROXY: "http://10.0.20.6:80"
-#    http_proxy: "http://10.0.20.6:80"
-#    https_proxy: "http://10.0.20.6:80"
-#    NO_PROXY: "git.emias.mos.ru,localhost,127.0.0.1"
-#    no_proxy: "git.emias.mos.ru,localhost,127.0.0.1"
-#  before_script:
-#    - apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
-#    - pip install --upgrade pip
-#    - pip install pre-commit
-#  script:
-#    - pre-commit run --all-files
-#  allow_failure: false
-#  rules:
-#    - if: $CI_COMMIT_BRANCH == "dev"
-#    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
+lint:
+  stage: lint
+  image: python:3.12-slim
+  variables:
+    HTTP_PROXY: "http://10.0.20.6:80"
+    HTTPS_PROXY: "http://10.0.20.6:80"
+    http_proxy: "http://10.0.20.6:80"
+    https_proxy: "http://10.0.20.6:80"
+    NO_PROXY: "git.emias.mos.ru,localhost,127.0.0.1"
+    no_proxy: "git.emias.mos.ru,localhost,127.0.0.1"
+  before_script:
+    - apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+    - pip install --upgrade pip
+    - pip install pre-commit
+  script:
+    - pre-commit run --all-files
+  allow_failure: false
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "dev"
 
 
 deploy:
@@ -83,4 +83,4 @@ deploy:
   allow_failure: false
 
   rules:
-    - if: $CI_COMMIT_BRANCH == "cicd"
+    - if: $CI_COMMIT_BRANCH == "dev"

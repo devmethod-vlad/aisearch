@@ -1,6 +1,6 @@
 [project]
 name = "aisearch"
-version = "0.1.0"
+version = "0.1.2"
 description = "AI Search Project"
 authors = [{ name = "emias" }]
 requires-python = ">=3.12,<4.0"
@@ -82,7 +82,7 @@ dev = [
     "black>=24.10.0,<25",
     "debugpy>=1.8.12,<2",
     "pytest>=8.3.4,<9",
-    "ruff>=0.6.6,<0.7",
+    "ruff>=0.14.10,<0.15",
     "pytest-asyncio>=0.21.1,<0.22",
     "pytest-cov>=5.0.0,<6",
     "pytest-xdist>=3.6.1,<4",
@@ -99,4 +99,6 @@ dev = [
     "types-toml>=0.10.8.20240310,<0.11",
     "testcontainers>=4.10.0,<5",
     "pre-commit>=4.2.0,<5",
+    "testcontainers[milvus]>=2.0.1",
+    "testcontainers[opensearch]>=2.0.1",
 ]

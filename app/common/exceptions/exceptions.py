@@ -36,3 +36,9 @@ class RequestException(Exception):
     """Ошибка запроса"""
 
     pass
+
+
+class NoCudaException(Exception):
+    """Ошибка отсутствия CUDA"""
+
+    pass

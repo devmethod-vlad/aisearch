@@ -69,15 +69,16 @@ services:
         redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE --scan --pattern \"aisearch:health:$$WORKER_ID:celery-proc:*\" | xargs -r redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE del &&
         /backend/scripts/wait_for_services.sh $$CELERY_LOGS_PATH &&
         alembic upgrade head &&
-        python3 pre_launch.py --load --logtype celery &&
+        python3 pre_launch.py &&
         exec celery -A app.infrastructure.search_worker.worker:worker worker -Q gpu-search --concurrency ${CELERY_WORKERS_NUM}
       "
     volumes:
       - ./:/backend
       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
       - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+      - ${APP_COLLECTION_FILES_HOST_DIR}/:${APP_COLLECTION_FILES_CONTR_DIR}/
+      - ${APP_PRELAUNCH_DATA_HOST_DIR}/:${APP_PRELAUNCH_DATA_CONTR_DIR}/
     env_file:
       - .env
     environment:
@@ -182,6 +183,7 @@ services:
       memlock:
         soft: -1
         hard: -1
+    stop_grace_period: 20s
     ports:
       - 9200:9200
     healthcheck:
@@ -200,7 +202,6 @@ services:
     volumes:
       - ./:/backend
       - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-      - ${BM25_INDEX_PATH_HOST}/:${BM25_INDEX_PATH}/
       - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
       - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
     env_file:

@@ -35,6 +35,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile_search_main
+      target: dev
       args:
         https_proxy: ${HTTPS_PROXY_ENV}
         http_proxy: ${HTTP_PROXY_ENV}
@@ -94,27 +95,28 @@ services:
     networks:
       - default
 
-#  aisearch-updater:
-#    networks:
-#      - default
-#      - service-network
-#    build:
-#      context: .
-#      dockerfile: Dockerfile_search_main
-#      args:
-#        https_proxy: ${HTTPS_PROXY_ENV}
-#        http_proxy: ${HTTP_PROXY_ENV}
-#        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
-#        HTTP_PROXY: ${HTTP_PROXY_ENV}
-#        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
-#        REGISTRY: ${REGISTRY}
-#    deploy:
-#      resources:
-#        reservations:
-#          devices:
-#            - driver: nvidia
-#              count: all
-#              capabilities: [ gpu ]
+  aisearch-updater:
+    networks:
+      - default
+      - service-network
+    build:
+      context: .
+      target: dev
+      dockerfile: Dockerfile_search_main
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
 
 #  aisearch-vllm:
 #    networks:

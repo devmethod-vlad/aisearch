@@ -58,7 +58,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.switches = settings.switches
         self.ce_settings = settings.reranker
         self.short = settings.short_settings
-        self.model = SentenceTransformer(settings.milvus.model_name)
+        self.model = SentenceTransformer(
+            settings.milvus.model_name, local_files_only=True
+        )
         self.morph = pymorphy3.MorphAnalyzer()
         self.model_name = settings.milvus.model_name.split("/")[-1]
         self.ce_model_name = self.ce_settings.model_name.split("/")[-1]
@@ -416,7 +418,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             }
         }
 
-        hits = await asyncio.to_thread(os_adapter.search, body, k)
+        hits = await os_adapter.search(body, k)
 
         out: list[dict[str, tp.Any]] = []
         output_fields = os_adapter.config.output_fields
@@ -598,9 +600,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             # 4) Лексическа
             if self.switches.use_hybrid:
                 if self.switches.use_opensearch:
-                    await asyncio.to_thread(
-                        self.os_adapter.search, {"query": {"match_all": {}}}, 1
-                    )
+                    await self.os_adapter.search({"query": {"match_all": {}}}, 1)
 
             # 5) Реранкер — одно предсказание
             if self.switches.use_reranker:
