@@ -16,18 +16,18 @@ repos:
         args: ['--maxkb=2048']
       - id: check-merge-conflict
   - repo: https://github.com/psf/black
-    rev: '26.1.0'
+    rev: '26.3.1'
     hooks:
       - id: black
         exclude: ^app/infrastructure/migrations/
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
+    rev: v0.15.8
     hooks:
     - id: ruff
       args: [--fix, --exit-non-zero-on-fix]
       exclude: ^app/infrastructure/migrations/
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: 'v1.19.1'
+    rev: 'v1.20.0'
     hooks:
       - id: mypy
         args: [--config-file, mypy.ini, .]

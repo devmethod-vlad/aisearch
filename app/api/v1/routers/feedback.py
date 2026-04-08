@@ -11,13 +11,11 @@ from app.api.v1.dto.requests.feedback import (
     SearchFeedbackBulkCreateRequest,
     SearchFeedbackCreateRequest,
     SearchFeedbackQueryRequest,
-    SearchRequestQueryRequest,
 )
 from app.api.v1.dto.responses.feedback import (
     FeedbackBulkCreateResponse,
     FeedbackCreateResponse,
     SearchFeedbacksResponse,
-    SearchRequestsResponse,
 )
 from app.common.fastapi_utils import TolerantAPIRouter
 from app.services.interfaces import IFeedbackService
@@ -90,23 +88,6 @@ async def bulk_create_knowledge_feedback(
         request=KnowledgeFeedbackBulkCreateRequest(feedbacks=feedbacks)
     )
     return JSONResponse(content=jsonable_encoder(result), status_code=201)
-
-
-@router.post(
-    "/request/list",
-    response_model=SearchRequestsResponse,
-    summary="Получение списка данных по запросам",
-)
-@limiter.limit(settings.slowapi.search, key_func=get_remote_address)
-@inject
-async def list_search_requests(
-    request: Request,
-    body: SearchRequestQueryRequest,
-    service: FromDishka[IFeedbackService] = None,
-) -> JSONResponse:
-    """Получение списка данных по запросам"""
-    response = await service.get_search_requests(body)
-    return JSONResponse(content=jsonable_encoder(response))
 
 
 @router.post(

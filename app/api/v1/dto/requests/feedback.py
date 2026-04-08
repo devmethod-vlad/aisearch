@@ -90,12 +90,6 @@ class KnowledgeFeedbackBulkCreateRequest(ArbitraryModel):
         return self
 
 
-class SearchRequestQueryRequest(PaginatedRequest, TimeIntervalRequest):
-    """Запрос для получения search_request"""
-
-    limit: int = Field(default=100, ge=1, le=200)
-
-
 class SearchFeedbackQueryRequest(PaginatedRequest, TimeIntervalRequest):
     """Запрос для получения search_feedback"""
 

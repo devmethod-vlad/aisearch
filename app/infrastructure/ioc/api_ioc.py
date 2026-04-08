@@ -17,8 +17,10 @@ from app.services.hybrid_search_service import HybridSearchService
 from app.services.interfaces import (
     IFeedbackService,
     IHybridSearchService,
+    IRequestsService,
     ITaskManagerService,
 )
+from app.services.requests import RequestsService
 from app.services.taskmanager import TaskManagerService
 from app.settings.config import AppSettings, PostgresSettings, Settings
 
@@ -44,6 +46,9 @@ class ApiSlimProvider(Provider):
     unit_of_work = provide(UnitOfWork, scope=Scope.REQUEST, provides=IUnitOfWork)
     feedback_service = provide(
         FeedbackService, scope=Scope.REQUEST, provides=IFeedbackService
+    )
+    requests_service = provide(
+        RequestsService, scope=Scope.REQUEST, provides=IRequestsService
     )
 
 

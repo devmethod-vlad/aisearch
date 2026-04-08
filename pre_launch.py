@@ -292,7 +292,7 @@ async def load_model(  # noqa: ANN201
     logger: logging.Logger,
 ):
     """Загружает модель для Milvus."""
-    logger.info(f"Загрузка модели {model_name.split('/')[-1]} ...")
+    logger.info(f"Загрузка модели {model_name.rsplit('/', maxsplit=1)[-1]} ...")
     from sentence_transformers import SentenceTransformer
 
     try:

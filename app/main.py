@@ -11,6 +11,7 @@ from app.api.v1.routers.hybrid_search import (
     limiter,
     router as hybrid_router,
 )
+from app.api.v1.routers.requests import router as requests_router
 from app.api.v1.routers.taskmanager import router as taskmanager_router
 from app.common.logger import LoggerType
 from app.common.providers import AuthProvider
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     application.include_router(taskmanager_router)
     application.include_router(hybrid_router)
     application.include_router(feedback_router)
+    application.include_router(requests_router)
     application.state.limiter = limiter
     application.add_middleware(SlowAPIASGIMiddleware)
 

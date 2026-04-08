@@ -10,16 +10,17 @@ from app.api.v1.dto.requests.feedback import (
     SearchFeedbackBulkCreateRequest,
     SearchFeedbackCreateRequest,
     SearchFeedbackQueryRequest,
-    SearchRequestQueryRequest,
 )
+from app.api.v1.dto.requests.requests import SearchRequestQueryRequest
 from app.api.v1.dto.responses.feedback import (
     FeedbackBulkCreateResponse,
     FeedbackCreateResponse,
     KnowledgeFeedbacksResponse,
     SearchFeedbacksResponse,
-    SearchRequestsResponse,
 )
+from app.api.v1.dto.responses.requests import SearchRequestsResponse
 from app.api.v1.dto.responses.taskmanager import TaskResponse
+from app.common.arbitrary_model import ArbitraryModel
 
 
 class ITaskManagerService(abc.ABC):
@@ -117,12 +118,6 @@ class IFeedbackService(ABC):
         """Массовое создание оценки знания"""
 
     @abstractmethod
-    async def get_search_requests(
-        self, request: SearchRequestQueryRequest
-    ) -> SearchRequestsResponse:
-        """Получение search_request с пагинацией и фильтрацией по времени"""
-
-    @abstractmethod
     async def get_search_feedbacks(
         self, request: SearchFeedbackQueryRequest
     ) -> SearchFeedbacksResponse:
@@ -133,3 +128,17 @@ class IFeedbackService(ABC):
         self, request: KnowledgeFeedbackQueryRequest
     ) -> KnowledgeFeedbacksResponse:
         """Получение knowledge_feedback с пагинацией и фильтрацией по времени"""
+
+
+class IRequestsService(ABC):
+    """Интерфейс сервиса запросов"""
+
+    @abstractmethod
+    async def get_search_requests(
+        self, request: SearchRequestQueryRequest
+    ) -> SearchRequestsResponse:
+        """Получение search_request с пагинацией и фильтрацией по времени"""
+
+    @abstractmethod
+    async def get_search_request_by_id(self, request_id: str) -> ArbitraryModel:
+        """Получение search_request по ID"""

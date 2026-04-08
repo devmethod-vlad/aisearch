@@ -18,12 +18,6 @@ class FeedbackBulkCreateResponse(ArbitraryModel):
     created_ids: list[uuid.UUID]
 
 
-class SearchRequestsResponse(PaginatedResponse):
-    """Ответ с search_request"""
-
-    pass
-
-
 class SearchFeedbacksResponse(PaginatedResponse):
     """Ответ с search_feedback"""
 

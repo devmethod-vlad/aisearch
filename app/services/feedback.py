@@ -8,14 +8,12 @@ from app.api.v1.dto.requests.feedback import (
     SearchFeedbackBulkCreateRequest,
     SearchFeedbackCreateRequest,
     SearchFeedbackQueryRequest,
-    SearchRequestQueryRequest,
 )
 from app.api.v1.dto.responses.feedback import (
     FeedbackBulkCreateResponse,
     FeedbackCreateResponse,
     KnowledgeFeedbacksResponse,
     SearchFeedbacksResponse,
-    SearchRequestsResponse,
 )
 from app.common.exceptions.exceptions import ConflictError
 from app.common.filters.filters import (
@@ -30,7 +28,6 @@ from app.common.logger import AISearchLogger
 from app.domain.exceptions import FeedbackException
 from app.domain.filters.knowledge_feedback import KnowledgeFeedbackFilter
 from app.domain.filters.search_feedback import SearchFeedbackFilter
-from app.domain.filters.search_request import SearchRequestFilter
 from app.domain.schemas.knowledge_feedback import KnowledgeFeedbackCreateDTO
 from app.domain.schemas.search_feedback import SearchFeedbackCreateDTO
 from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
@@ -181,43 +178,6 @@ class FeedbackService(IFeedbackService):
             )
 
             return FeedbackBulkCreateResponse(created_ids=created_ids)
-
-    async def get_search_requests(
-        self, request: SearchRequestQueryRequest
-    ) -> SearchRequestsResponse:
-        """Получение search_request с пагинацией и фильтрацией по времени"""
-        async with self.uow:
-
-            items, total, has_more = await self.uow.search_request.get_paginated(
-                filters=BaseFilter(
-                    condition=Condition.AND,
-                    nested_filters=(
-                        [
-                            SearchRequestFilter(
-                                modified_at=DateFilter(ge=request.start_time)
-                            )
-                        ]
-                        if request.start_time
-                        else None
-                    ),
-                    ordering=[
-                        OrderingFilter(
-                            field="modified_at", direction=OrderDirection.DESC
-                        )
-                    ],
-                    pagination=PaginationFilter(
-                        limit=request.limit, offset=request.offset
-                    ),
-                ),
-            )
-
-            return SearchRequestsResponse(
-                items=items,
-                total=total,
-                limit=request.limit,
-                offset=request.offset,
-                has_more=has_more,
-            )
 
     async def get_search_feedbacks(
         self, request: SearchFeedbackQueryRequest
