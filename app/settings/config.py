@@ -135,6 +135,8 @@ class HybridSearchSettings(EnvBaseSettings):
     precut_min_keep: int = 3
     cache_ttl: int = 3600
     version: str = "v1"
+    presearch_enabled: bool = False
+    presearch_field: str = "ext_id"
     collection_name: str = "kb_default"
     merge_by_field: str = "ext_id"
     merge_fields: str | list[str] = (

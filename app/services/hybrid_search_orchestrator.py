@@ -120,13 +120,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         settings_local = deepcopy(self.settings)
         switches_local = deepcopy(self.switches)
 
+        raw_query = str(pack["query"]).strip()
         # ---- Short settings ----
         if self.short.mode:
             sh_start = time.perf_counter()
 
-            query_tokens = normalize_query(
-                query=pack["query"], morph=self.morph
-            ).split()
+            query_tokens = normalize_query(query=raw_query, morph=self.morph).split()
             self._metrics_logger(
                 label="🕒 Normalize query (short mode)", start_time=sh_start
             )
@@ -154,16 +153,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         # ---- Normalize query ----
         if self.normalize_query:
             normalize_start = time.perf_counter()
-            query = normalize_query(query=pack["query"], morph=self.morph)
+            query = normalize_query(query=raw_query, morph=self.morph)
             query_hash = hash_query(query)
             top_k = int(pack["top_k"])
             metrics["normalize_time"] = self._metrics_logger(
                 "🕒 Normalize query", normalize_start
             )
         else:
-            query = pack["query"]
+            query = raw_query
             top_k = int(pack["top_k"])
-            query_hash = pack["query"]
+            query_hash = raw_query
 
         need_ack = True
 
@@ -187,7 +186,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     "🕒 Semaphore acquire", time.perf_counter()
                 )
 
-                cache_key = f"hyb:{query_hash}:{top_k}:{settings_local.version}"
+                presearch_enabled = bool(settings_local.presearch_enabled)
+                presearch_field = settings_local.presearch_field
+                presearch_key = f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
+                cache_key = (
+                    f"hyb:{query_hash}:{top_k}:{settings_local.version}:{presearch_key}"
+                )
                 cached = await self.redis.get(cache_key) if self.use_cache else None
 
                 if cached:
@@ -199,6 +203,19 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     )
                     merged = None
                 else:
+                    # ---- Presearch ----
+                    presearch_result = None
+                    if presearch_enabled:
+                        presearch_start = time.perf_counter()
+                        presearch_result = await self._presearch_exact_match(
+                            query=raw_query,
+                            field_name=presearch_field,
+                            use_ce=switches_local.use_reranker,
+                        )
+                        metrics["presearch_time"] = self._metrics_logger(
+                            "🕒 Presearch (exact match)", presearch_start
+                        )
+
                     # ---- Embedding ----
                     encode_start = time.perf_counter()
                     query_vector = (
@@ -283,6 +300,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     _results = self._score_and_slice(
                         merged, top_k, use_ce=switches_local.use_reranker
                     )
+                    if presearch_result:
+                        _results = self._inject_presearch_result(
+                            results=_results,
+                            presearch_result=presearch_result,
+                            top_k=top_k,
+                            merge_by_field=settings_local.merge_by_field,
+                        )
+
                     results = _results
 
                     if self.use_cache:
@@ -366,6 +391,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 if self.response_metrics_enabled:
                     payload["metrics"] = {
+                        "presearch_time": metrics.get("presearch_time"),
+                        "presearch_enabled": presearch_enabled,
                         "embedding_time": metrics.get("embedding_time"),
                         "vector_search_time": metrics.get("vector_search_time"),
                         "lexical_search_time": metrics.get("lexical_search_time"),
@@ -453,6 +480,86 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     x["score_lex"] = 0.0
 
         return out
+
+    async def _presearch_exact_match(
+        self,
+        query: str,
+        field_name: str,
+        *,
+        use_ce: bool,
+    ) -> dict[str, tp.Any] | None:
+        """Ищет один точный (без учета регистра) результат по заданному полю OpenSearch.
+
+        Используем term query с флагом case_insensitive и проверяем два варианта поля:
+        - `<field_name>` (если поле уже keyword/normalizer);
+        - `<field_name>.keyword` (типичный подполе для text).
+        """
+        os_adapter = self.os_adapter
+        output_fields = os_adapter.config.output_fields
+
+        should_terms = [
+            {"term": {field_name: {"value": query, "case_insensitive": True}}},
+            {
+                "term": {
+                    f"{field_name}.keyword": {"value": query, "case_insensitive": True}
+                }
+            },
+        ]
+        body = {
+            "query": {
+                "bool": {
+                    "minimum_should_match": 1,
+                    "should": should_terms,
+                }
+            }
+        }
+        hits = await os_adapter.search(body, 1)
+        if not hits:
+            return None
+
+        hit = hits[0]
+        src = hit.get("_source", {})
+        item: dict[str, tp.Any] = {
+            "score_lex_raw": float(hit.get("_score", 0.0)),
+            "score_dense": 0.0,
+            "score_lex": 1.0,
+            "score_final": 1.0,
+            "_source": "presearch",
+            "sources": ["presearch"],
+        }
+        if use_ce:
+            item["score_ce"] = 0.0
+
+        for field in output_fields:
+            item[field] = src.get(field, "")
+
+        return item
+
+    def _inject_presearch_result(
+        self,
+        results: list[dict[str, tp.Any]],
+        presearch_result: dict[str, tp.Any],
+        top_k: int,
+        merge_by_field: str,
+    ) -> list[dict[str, tp.Any]]:
+        """Встраивает presearch-результат на первое место.
+
+        Если результат уже есть в выдаче, удаляем дубликат по merge-полю.
+        Затем добавляем presearch наверх и подрезаем до top_k.
+        """
+        result_key_value = presearch_result.get(merge_by_field)
+        filtered_results = [
+            item
+            for item in results
+            if not (
+                result_key_value
+                and item.get(merge_by_field)
+                and item.get(merge_by_field) == result_key_value
+            )
+        ]
+
+        merged_results = [presearch_result, *filtered_results]
+        return merged_results[:top_k]
 
     def _merge_candidates(
         self,

@@ -1,0 +1,327 @@
+services:
+  aisearch-app-test:
+    container_name: aisearch-app-test
+    build:
+      context: .
+      dockerfile: Dockerfile_api
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+    networks:
+      - default
+      - service-network
+    env_file:
+      - .env
+    environment:
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - APP_LOGS_ACCESS_PATH=${LOGS_CONTR_DIR}/${LOGS_ACCESS_LOCATION}
+      - APP_LOGS_PATH=${LOGS_CONTR_DIR}/${APP_LOGS_LOCATION}
+    volumes:
+      - ./:/backend
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+    ports:
+      - ${APP_PORT}:${APP_PORT}
+    healthcheck:
+      test: ["CMD", "bash", "-c", "set -o pipefail; /backend/scripts/api_killer.sh $$APP_LOGS_PATH | tee /proc/1/fd/1"]
+      interval: 30s
+      timeout: 15s
+      retries: 1
+    depends_on:
+      aisearch-milvus-test:
+        condition: service_healthy
+        restart: true
+      aisearch-celery-worker-test:
+        condition: service_healthy
+        restart: true
+      aisearch-opensearch-test:
+        condition: service_started
+        restart: true
+      aisearch-queue-worker-test:
+        condition: service_started
+        restart: true
+    command: >
+      sh -c "
+        /backend/scripts/wait_for_services.sh $$APP_LOGS_PATH &&
+        exec gunicorn app.main:app -b ${APP_HOST}:${APP_PORT} -w ${APP_WORKERS_NUM} -k uvicorn_worker.UvicornWorker -c app/settings/gunicorn_conf.py
+      "
+
+  aisearch-queue-worker-test:
+    container_name: aisearch-queue-worker-test
+    build:
+      context: .
+      dockerfile: Dockerfile_queue
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+    networks:
+      - default
+      - service-network
+    command: >
+      sh -c "
+        exec python3 -m app.infrastructure.queue_worker.worker -Q gpu-search
+      "
+    volumes:
+      - ./:/backend
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/cross-encoder-russian-msmarco
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/USER-bge-m3
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - CELERY_LOGS_QUEUE_PATH=${LOGS_CONTR_DIR}/${CELERY_LOGS_QUEUE_LOCATION}
+    depends_on:
+      aisearch-milvus-test:
+        condition: service_healthy
+        restart: true
+      aisearch-celery-worker-test:
+        condition: service_healthy
+        restart: true
+
+  aisearch-celery-worker-test:
+    container_name: aisearch-celery-search-worker-test
+    build:
+      context: .
+      dockerfile: Dockerfile_search_main
+      target: prod
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+    networks:
+      - default
+      - service-network
+    command: >
+      sh -c "
+        redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE --scan --pattern \"aisearch:health:$$WORKER_ID:celery-proc:*\" | xargs -r redis-cli -h $$REDIS_HOSTNAME -p $$REDIS_PORT -n $$REDIS_DATABASE del &&
+        /backend/scripts/wait_for_services.sh $$CELERY_LOGS_PATH &&
+        alembic upgrade head &&
+        python3 pre_launch.py &&
+        exec celery -A app.infrastructure.search_worker.worker:worker worker -Q gpu-search --concurrency ${CELERY_WORKERS_NUM}
+      "
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+      - ${APP_COLLECTION_FILES_HOST_DIR}/:${APP_COLLECTION_FILES_CONTR_DIR}/
+      - ${APP_PRELAUNCH_DATA_HOST_DIR}/:${APP_PRELAUNCH_DATA_CONTR_DIR}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - WORKER_ID=search@celery-w1
+      - CELERY_LOGS_PATH=${LOGS_CONTR_DIR}/${CELERY_LOGS_LOCATION}
+
+    depends_on:
+      aisearch-milvus-test:
+        condition: service_healthy
+        restart: true
+      aisearch-opensearch-test:
+        condition: service_started
+        restart: true
+
+    healthcheck:
+      test: [
+        "CMD", "bash", "-lc",
+        "set -o pipefail; python3 -m app.infrastructure.search_worker.healthcheck 2>&1 | tee /proc/1/fd/1"
+      ]
+      interval: 5s
+      timeout: 30s
+      retries: 5
+      start_period: 120s
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+  aisearch-etcd-test:
+    container_name: aisearch-etcd-test
+    image: quay.io/coreos/etcd:v3.5.18
+    env_file:
+      - .env
+    volumes:
+      - ${ETCD_VOLUME_HOST_PATH}:${ETCD_VOLUME_CONTR_PATH}
+    command: etcd -advertise-client-urls=http://aisearch-etcd-test:${ETCD_PORT} -listen-client-urls http://0.0.0.0:${ETCD_PORT} --data-dir /etcd
+    environment:
+      - ETCDCTL_API=3
+      - ETCDCTL_ENDPOINTS=http://127.0.0.1:${ETCD_PORT}
+    networks:
+      - default
+    healthcheck:
+        test: [ "CMD", "etcdctl", "endpoint", "health" ]
+        interval: 30s
+        timeout: 20s
+        retries: 3
+
+  aisearch-minio-test:
+    container_name: aisearch-minio-test
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    env_file:
+      - .env
+    ports:
+      - 9002:${MINIO_WEB_UI_PORT}
+      - 8999:${MINIO_PORT}
+    volumes:
+      - ${MINIO_VOLUME_HOST_PATH}:${MINIO_VOLUME_CONTR_PATH}
+    command: minio server /minio_data --console-address :${MINIO_WEB_UI_PORT}
+    networks:
+      - default
+    healthcheck:
+      test: curl -f ${MINIO_HOST}:${MINIO_PORT}/minio/health/live || exit 1
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  aisearch-milvus-test:
+    container_name: aisearch-milvus-test
+    image: milvusdb/milvus:v2.5.12
+    env_file:
+      - .env
+    command: [ "milvus", "run", "standalone" ]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: aisearch-etcd-test:${ETCD_PORT}
+      MINIO_ADDRESS: aisearch-minio-test:${MINIO_PORT}
+    volumes:
+      - ${MILVUS_VOLUME_HOST_PATH}:${MILVUS_VOLUME_CONTR_PATH}
+    healthcheck:
+      test: curl -f ${MILVUS_HOST}:${MILVUS_WEB_UI_PORT}/healthz || exit 1
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    networks:
+      - default
+    ports:
+      - 19531:${MILVUS_PORT}
+      - 9092:${MILVUS_WEB_UI_PORT}
+    depends_on:
+      - aisearch-etcd-test
+      - aisearch-minio-test
+
+  attu-test:
+    image: zilliz/attu:v2.5.0
+    container_name: aisearch-attu-test
+    ports:
+      - 8011:3000
+    networks:
+      - default
+    depends_on:
+      aisearch-milvus-test:
+        condition: service_healthy
+
+  aisearch-opensearch-test:
+    image: opensearchproject/opensearch:2.12.0
+    container_name: aisearch-opensearch-test
+    env_file:
+      - .env
+    environment:
+      - discovery.type=single-node
+      - plugins.security.disabled=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g
+    volumes:
+      - ${OS_VOLUME_HOST_PATH}:${OS_VOLUME_CONTR_PATH}
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    stop_grace_period: 20s
+    networks:
+      - default
+    ports:
+      - 9201:${OS_PORT}
+    healthcheck:
+      test: curl -f http://localhost:${OS_PORT}
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  aisearch-os-dashboards-test:
+    image: opensearchproject/opensearch-dashboards:2.12.0
+    container_name: aisearch-os-dashboards-test
+    environment:
+      OPENSEARCH_HOSTS: '["http://aisearch-opensearch-test:${OS_PORT}"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
+    ports:
+      - "5602:5601"
+    networks:
+      - default
+    depends_on:
+      aisearch-opensearch-test:
+        condition: service_healthy
+
+  aisearch-updater-test:
+    container_name: aisearch-updater-test
+    build:
+      context: .
+      dockerfile: Dockerfile_search_main
+      target: prod
+      args:
+        https_proxy: ${HTTPS_PROXY_ENV}
+        http_proxy: ${HTTP_PROXY_ENV}
+        HTTPS_PROXY: ${HTTPS_PROXY_ENV}
+        HTTP_PROXY: ${HTTP_PROXY_ENV}
+        IMAGE_NAME_DEPS: ${IMAGE_NAME_DEPS}
+        REGISTRY: ${REGISTRY}
+    networks:
+      - default
+      - service-network
+    command: >
+      sh -c "
+        /backend/scripts/wait_for_services.sh $$EXTRACT_LOGS_PATH &&
+        exec python3 -m app.scheduler
+      "
+    volumes:
+      - ./:/backend
+      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
+      - ${LOGS_HOST_DIR}/:${LOGS_CONTR_DIR}/
+      - ${NLTK_DATA_HOST_PATH}/:${NLTK_DATA_CONTR_PATH}/
+    env_file:
+      - .env
+    environment:
+      - RERANKER_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${RERANKER_MODEL_NAME}
+      - MILVUS_MODEL_NAME=${APP_MODELSTORE_CONTR_PATH}/${MILVUS_MODEL_NAME}
+      - LLM_GLOBAL_SEM_REDIS_DSN=redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}
+      - NLTK_DATA=${NLTK_DATA_CONTR_PATH}
+      - EXTRACT_LOGS_PATH=${LOGS_CONTR_DIR}/${EXTRACT_LOGS_LOCATION}
+    depends_on:
+      aisearch-milvus-test:
+        condition: service_healthy
+        restart: true
+      aisearch-opensearch-test:
+        condition: service_started
+        restart: true
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [ gpu ]
+
+networks:
+  default:
+    driver: bridge
+
+  service-network:
+    name: service-network
+    external: true

@@ -106,6 +106,8 @@
     HYBRID_W_LEX=0.15
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
+    HYBRID_PRESEARCH_ENABLED=false
+    HYBRID_PRESEARCH_FIELD=ext_id
     HYBRID_COLLECTION_NAME=kb_default
     HYBRID_MERGE_BY_FIELD=ext_id
     HYBRID_MERGE_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
