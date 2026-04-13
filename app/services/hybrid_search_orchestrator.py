@@ -490,13 +490,68 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
     ) -> dict[str, tp.Any] | None:
         """Ищет один точный (без учета регистра) результат по заданному полю OpenSearch.
 
-        Используем term query с флагом case_insensitive и проверяем два варианта поля:
-        - `<field_name>` (если поле уже keyword/normalizer);
-        - `<field_name>.keyword` (типичный подполе для text).
+        Важный момент: в разных схемах индекса `term + case_insensitive` может
+        срабатывать только на части полей, поэтому используем двухэтапный подход:
+        1) быстрый exact-запрос term/case_insensitive по `<field>` и `<field>.keyword`;
+        2) fallback через match_phrase + строгая проверка в Python
+           (`value.casefold() == query.casefold()`), чтобы гарантировать
+           регистронезависимое точное совпадение по исходной строке поля.
         """
         os_adapter = self.os_adapter
         output_fields = os_adapter.config.output_fields
 
+        query_folded = query.casefold()
+
+        # 1) Наиболее надежный путь: script query по doc-values (обычно keyword).
+        # Не зависит от поддержки `case_insensitive` в term-query для конкретной версии OS.
+        script_should = [
+            {
+                "script": {
+                    "script": {
+                        "lang": "painless",
+                        "source": (
+                            "if (!doc.containsKey(params.field) || doc[params.field].empty) "
+                            "{ return false; } "
+                            "return doc[params.field].value.toString().toLowerCase() == params.q;"
+                        ),
+                        "params": {"field": field_name, "q": query_folded},
+                    }
+                }
+            },
+            {
+                "script": {
+                    "script": {
+                        "lang": "painless",
+                        "source": (
+                            "if (!doc.containsKey(params.field) || doc[params.field].empty) "
+                            "{ return false; } "
+                            "return doc[params.field].value.toString().toLowerCase() == params.q;"
+                        ),
+                        "params": {"field": f"{field_name}.keyword", "q": query_folded},
+                    }
+                }
+            },
+        ]
+        body = {
+            "query": {
+                "bool": {
+                    "minimum_should_match": 1,
+                    "should": script_should,
+                }
+            }
+        }
+        hits = await os_adapter.search(body, 1)
+
+        if hits:
+            for hit in hits:
+                if self._is_case_insensitive_exact_match(
+                    source=hit.get("_source", {}),
+                    field_name=field_name,
+                    query=query,
+                ):
+                    return self._build_presearch_item(hit, output_fields, use_ce=use_ce)
+
+        # 1.1) Дополнительный быстрый fallback на случай отключенных скриптов.
         should_terms = [
             {"term": {field_name: {"value": query, "case_insensitive": True}}},
             {
@@ -505,7 +560,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 }
             },
         ]
-        body = {
+        term_body = {
             "query": {
                 "bool": {
                     "minimum_should_match": 1,
@@ -513,11 +568,57 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 }
             }
         }
-        hits = await os_adapter.search(body, 1)
-        if not hits:
-            return None
+        term_hits = await os_adapter.search(term_body, 1)
+        for hit in term_hits:
+            if self._is_case_insensitive_exact_match(
+                source=hit.get("_source", {}),
+                field_name=field_name,
+                query=query,
+            ):
+                return self._build_presearch_item(hit, output_fields, use_ce=use_ce)
 
-        hit = hits[0]
+        # Fallback: расширяем окно кандидатов и фильтруем exact-match локально.
+        fallback_body = {"query": {"match_phrase": {field_name: {"query": query}}}}
+        fallback_hits = await os_adapter.search(fallback_body, 20)
+        for hit in fallback_hits:
+            if self._is_case_insensitive_exact_match(
+                source=hit.get("_source", {}),
+                field_name=field_name,
+                query=query,
+            ):
+                return self._build_presearch_item(hit, output_fields, use_ce=use_ce)
+
+        return None
+
+    def _is_case_insensitive_exact_match(
+        self,
+        source: dict[str, tp.Any],
+        field_name: str,
+        query: str,
+    ) -> bool:
+        """Строгое сравнение строки поля и query без учета регистра.
+
+        Запрос уже приходит в виде `strip()` из внешней логики.
+        Содержимое поля не трогаем (не strip), чтобы сохранить требование
+        «точное совпадение символов, кроме регистра».
+        """
+        value = source.get(field_name)
+        if value is None:
+            return False
+        if isinstance(value, str):
+            value_str = value
+        else:
+            value_str = str(value)
+        return value_str.casefold() == query.casefold()
+
+    def _build_presearch_item(
+        self,
+        hit: dict[str, tp.Any],
+        output_fields: list[str],
+        *,
+        use_ce: bool,
+    ) -> dict[str, tp.Any]:
+        """Приводит hit предварительного поиска к единому формату выдачи."""
         src = hit.get("_source", {})
         item: dict[str, tp.Any] = {
             "score_lex_raw": float(hit.get("_score", 0.0)),
