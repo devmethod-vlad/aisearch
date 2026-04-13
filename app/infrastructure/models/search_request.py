@@ -12,7 +12,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.schema import Index, UniqueConstraint
+from sqlalchemy.schema import Index
 
 from app.infrastructure.models.base import Base
 
@@ -54,7 +54,6 @@ class SearchRequest(Base):
     results: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
 
     __table_args__ = (
-        UniqueConstraint("id", name="unique_search_request_id"),
         Index(
             "ix_search_request_query_gin_trgm",
             "query",
