@@ -298,7 +298,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             m["score_ce"] = float(s)
 
                     _results = self._score_and_slice(
-                        merged, top_k, use_ce=switches_local.use_reranker
+                        merged,
+                        top_k,
+                        use_ce=switches_local.use_reranker,
+                        w_dense=w_dense,
+                        w_lex=w_lex,
+                        w_ce=w_ce,
                     )
                     if presearch_result:
                         _results = self._inject_presearch_result(
@@ -747,26 +752,33 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         return out
 
     def _score_and_slice(
-        self, items: list[dict[str, tp.Any]], top_k: int, *, use_ce: bool
+        self,
+        items: list[dict[str, tp.Any]],
+        top_k: int,
+        *,
+        use_ce: bool,
+        w_dense: float,
+        w_lex: float,
+        w_ce: float,
     ) -> list[dict[str, tp.Any]]:
         if not items:
             return []
 
         def _max(key: str) -> float:
-            return max((i.get(key, 0.0) for i in items), default=1.0) or 1.0
+            return max((float(i.get(key, 0.0)) for i in items), default=1.0) or 1.0
 
         m_dense = _max("score_dense")
-        m_lex = _max("score_lex")
-        m_ce = _max("score_ce") if use_ce else 1.0
+        # score_lex уже нормализован в _os_candidates, max там обычно == 1
+        # можно вообще не пересчитывать m_lex
         for it in items:
-            nd = (it.get("score_dense", 0.0) / m_dense) if m_dense else 0.0
-            nl = (it.get("score_lex", 0.0) / m_lex) if m_lex else 0.0
-            nc = (it.get("score_ce", 0.0) / m_ce) if use_ce else 0.0
+            nd = float(it.get("score_dense", 0.0)) / m_dense if m_dense else 0.0
+            nl = float(it.get("score_lex", 0.0))
+            nc = float(it.get("score_ce", 0.0)) if use_ce else 0.0
+
             it["score_final"] = (
-                self.settings.w_dense * nd
-                + self.settings.w_lex * nl
-                + (self.settings.w_ce * nc if use_ce else 0.0)
+                w_dense * nd + w_lex * nl + (w_ce * nc if use_ce else 0.0)
             )
+
         items.sort(key=lambda x: x.get("score_final", 0.0), reverse=True)
         return items[:top_k]
 
