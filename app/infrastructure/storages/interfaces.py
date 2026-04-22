@@ -28,7 +28,11 @@ class IVectorDatabase(abc.ABC):
 
     @abc.abstractmethod
     async def search(
-        self, collection_name: str, query_vector: list[float], top_k: int
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        top_k: int,
+        filter_expr: str | None = None,
     ) -> list[dict[str, tp.Any]]:
         """Поиск по косинусной схожести."""
 

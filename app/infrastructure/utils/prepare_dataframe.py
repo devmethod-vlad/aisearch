@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.infrastructure.utils.token_filters import TOKEN_FILTER_CONFIG, tokenize_multi_value
+
 
 def load_field_mapping(config_path: str | Path) -> dict[str, str]:
     """Загружает маппинг полей из JSON файла"""
@@ -204,6 +206,17 @@ def prepare_dataframe(
 
     df_final = pd.concat([vio_df, tp_df], ignore_index=True)
     df_final["row_idx"] = range(len(df_final))
+
+    for raw_field in TOKEN_FILTER_CONFIG.raw_fields:
+        token_field = TOKEN_FILTER_CONFIG.token_field(raw_field)
+        if raw_field not in df_final.columns:
+            df_final[token_field] = [[] for _ in range(len(df_final))]
+            continue
+        df_final[token_field] = df_final[raw_field].apply(
+            lambda value: tokenize_multi_value(
+                value, separator=TOKEN_FILTER_CONFIG.raw_separator
+            )
+        )
 
     documents = df_final["question"].astype(str).tolist()
     metadata = df_final.to_dict(orient="records")

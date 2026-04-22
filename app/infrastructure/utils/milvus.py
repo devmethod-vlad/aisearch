@@ -15,6 +15,7 @@ DTYPE_MAP = {
     "VARCHAR": DataType.VARCHAR,
     "FLOAT_VECTOR": DataType.FLOAT_VECTOR,
     "BINARY_VECTOR": DataType.BINARY_VECTOR,
+    "ARRAY": DataType.ARRAY,
 }
 
 
@@ -61,6 +62,21 @@ def load_schema_and_indexes_from_json(
         }
         if dtype == DataType.VARCHAR:
             kwargs["max_length"] = raw_field.get("max_length", 255)
+        elif dtype == DataType.ARRAY:
+            element_type_name = raw_field.get("element_type")
+            if not element_type_name:
+                raise ValueError(
+                    f"ARRAY поле должно содержать element_type: {raw_field}"
+                )
+            element_type = DTYPE_MAP.get(element_type_name)
+            if element_type is None:
+                raise ValueError(
+                    f"Неподдерживаемый element_type '{element_type_name}' в поле: {raw_field}"
+                )
+            kwargs["element_type"] = element_type
+            kwargs["max_capacity"] = raw_field.get("max_capacity", 16)
+            if element_type == DataType.VARCHAR:
+                kwargs["max_length"] = raw_field.get("max_length", 255)
         elif dtype in (DataType.FLOAT_VECTOR, DataType.BINARY_VECTOR):
             kwargs["dim"] = raw_field.get("dim")
         fields.append(FieldSchema(**kwargs))

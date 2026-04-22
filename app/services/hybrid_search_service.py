@@ -33,7 +33,13 @@ class HybridSearchService(IHybridSearchService):
         self.llm_queue_settings = settings.llm_queue
         self.queue = queue
 
-    async def enqueue_search(self, query: str, top_k: int) -> TaskResponse:
+    async def enqueue_search(
+        self,
+        query: str,
+        top_k: int,
+        role: str | None = None,
+        product: str | None = None,
+    ) -> TaskResponse:
         """Ставит задачу поиска в очередь."""
         ticket_id = str(uuid.uuid4())
         pack_key = f"{self.llm_queue_settings.ticket_hash_prefix}{ticket_id}:pack"
@@ -42,6 +48,8 @@ class HybridSearchService(IHybridSearchService):
             "type": "search",
             "query": query,
             "top_k": top_k,
+            "role": role,
+            "product": product,
         }
         await self.redis.set(
             pack_key,
