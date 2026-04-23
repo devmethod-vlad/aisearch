@@ -39,8 +39,8 @@ class IHybridSearchService(abc.ABC):
         self,
         query: str,
         top_k: int,
-        role: str | None = None,
-        product: str | None = None,
+        role: list[str] | None = None,
+        product: list[str] | None = None,
     ) -> TaskResponse:
         """постановка задачи поиска по документам в очередь"""
         pass

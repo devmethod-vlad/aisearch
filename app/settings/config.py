@@ -6,6 +6,7 @@ from pathlib import Path
 from pydantic import (
     PostgresDsn,
     RedisDsn,
+    ValidationInfo,
     field_validator,
     model_validator,
 )
@@ -156,6 +157,33 @@ class HybridSearchSettings(EnvBaseSettings):
         return self
 
     model_config = SettingsConfigDict(env_prefix="hybrid_")
+
+
+class TokenFiltersSettings(EnvBaseSettings):
+    """Настройки token-фильтрации мультизначных полей."""
+
+    env_separator: str = ","
+    raw_fields: tuple[str, ...] = ()
+    token_suffix: str = "_tokens"
+    raw_separator: str = ";"
+
+    @field_validator("raw_fields", mode="before")
+    @classmethod
+    def parse_raw_fields(
+        cls, v: tp.Any, info: ValidationInfo
+    ) -> tuple[str, ...]:
+        separator = info.data.get("env_separator", ",")
+
+        if isinstance(v, str):
+            values = [item.strip() for item in v.split(separator) if item.strip()]
+            return tuple(values)
+        if isinstance(v, (list, tuple, set)):
+            values = [str(item).strip() for item in v if str(item).strip()]
+            return tuple(values)
+
+        raise ValueError("raw_fields должен быть строкой или списком значений")
+
+    model_config = SettingsConfigDict(env_prefix="token_filters_")
 
 
 class SearchSwitches(EnvBaseSettings):
@@ -403,6 +431,7 @@ class Settings(EnvBaseSettings):
     celery: CelerySettings = CelerySettings()
     vllm: VLLMSettings = VLLMSettings()
     hybrid: HybridSearchSettings = HybridSearchSettings()
+    token_filters: TokenFiltersSettings = TokenFiltersSettings()
     llm_queue: LLMQueueSettings = LLMQueueSettings()
     llm_global_sem: LLMGlobalSemaphoreSettings = LLMGlobalSemaphoreSettings()
     opensearch: OpenSearchSettings = OpenSearchSettings()

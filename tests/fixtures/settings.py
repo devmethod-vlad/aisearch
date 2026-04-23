@@ -22,6 +22,7 @@ from app.settings.config import (
     Settings,
     ShortSettings,
     SlowAPISettings,
+    TokenFiltersSettings,
     VLLMSettings,
     WarmupSettings,
 )
@@ -46,6 +47,7 @@ def test_settings(
     test_search_metrics_settings: SearchMetricsEnabled,
     test_extract_edu_settings: ExtractEduSettings,
     test_short_settings: ShortSettings,
+    test_token_filters_settings: TokenFiltersSettings,
 ) -> Settings:
     """Полные настройки для тестов"""
     return Settings(
@@ -67,6 +69,7 @@ def test_settings(
         extract_edu=test_extract_edu_settings,
         postgres=test_database_settings,
         short_settings=test_short_settings,
+        token_filters=test_token_filters_settings,
     )
 
 
@@ -359,4 +362,14 @@ def test_short_settings() -> ShortSettings:
         w_ce=0.6,
         w_dense=0.25,
         w_lex=0.15,
+    )
+
+
+@pytest.fixture(scope="session")
+def test_token_filters_settings() -> TokenFiltersSettings:
+    return TokenFiltersSettings(
+        env_separator=",",
+        raw_fields="role,product",
+        token_suffix="_tokens",
+        raw_separator=";",
     )

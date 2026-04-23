@@ -6,5 +6,5 @@ class SearchRequest(BaseModel):
 
     query: str
     top_k: int = 5
-    role: str | None = None
-    product: str | None = None
+    role: list[str] | None = None
+    product: list[str] | None = None

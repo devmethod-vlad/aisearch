@@ -15,6 +15,7 @@ from app.infrastructure.utils.prepare_dataframe import (
     split_by_source,
     validate_dataframe,
 )
+from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 from app.infrastructure.utils.universal import cleanup_resources
 from app.services.interfaces import IUpdaterService
 from app.settings.config import Settings
@@ -38,6 +39,11 @@ class UpdaterService(IUpdaterService):
         self.model: SentenceTransformer | None = None
         self.field_mapping = load_field_mapping(settings.app.field_mapping_schema_path)
         self.id_column = settings.app.data_unique_id
+        self.token_filter_config = MultiValueTokenConfig(
+            raw_fields=settings.token_filters.raw_fields,
+            token_suffix=settings.token_filters.token_suffix,
+            raw_separator=settings.token_filters.raw_separator,
+        )
 
     async def _load_excel_from_edu(self, file_type: str) -> pd.DataFrame:
         if file_type == "vio":
@@ -246,7 +252,9 @@ class UpdaterService(IUpdaterService):
             id_column=self.id_column,
         )
         _, _, df_prepared = prepare_dataframe(
-            vio_df_validated, id_column=self.id_column
+            vio_df_validated,
+            id_column=self.id_column,
+            token_config=self.token_filter_config,
         )
         await self._update_collection_from_df(df_prepared, target_source="ВиО")
 
@@ -262,7 +270,11 @@ class UpdaterService(IUpdaterService):
             self.settings.app.field_mapping_schema_path,
             id_column=self.id_column,
         )
-        _, _, df_prepared = prepare_dataframe(tp_df_validated, id_column=self.id_column)
+        _, _, df_prepared = prepare_dataframe(
+            tp_df_validated,
+            id_column=self.id_column,
+            token_config=self.token_filter_config,
+        )
         await self._update_collection_from_df(df_prepared, target_source="ТП")
 
         cleanup_resources(self.logger)
@@ -295,10 +307,18 @@ class UpdaterService(IUpdaterService):
 
         tp_df, vio_df = split_by_source(combined_df)
 
-        _, _, df_prepared = prepare_dataframe(tp_df, id_column=self.id_column)
+        _, _, df_prepared = prepare_dataframe(
+            tp_df,
+            id_column=self.id_column,
+            token_config=self.token_filter_config,
+        )
         await self._update_collection_from_df(df_prepared, target_source="ТП")
 
-        _, _, df_prepared = prepare_dataframe(vio_df, id_column=self.id_column)
+        _, _, df_prepared = prepare_dataframe(
+            vio_df,
+            id_column=self.id_column,
+            token_config=self.token_filter_config,
+        )
         await self._update_collection_from_df(df_prepared, target_source="ВиО")
 
         cleanup_resources(self.logger)

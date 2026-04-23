@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
-from app.infrastructure.utils.token_filters import TOKEN_FILTER_CONFIG, tokenize_multi_value
+from app.infrastructure.utils.token_filters import (
+    MultiValueTokenConfig,
+    enrich_records_with_token_fields,
+)
 
 
 def load_field_mapping(config_path: str | Path) -> dict[str, str]:
@@ -162,7 +165,9 @@ def combine_validated_sources(
 
 
 def prepare_dataframe(
-    df: pd.DataFrame, id_column: str
+    df: pd.DataFrame,
+    id_column: str,
+    token_config: MultiValueTokenConfig | None = None,
 ) -> tuple[list[str], list[dict], pd.DataFrame]:
     """Унифицированная очистка/фильтрация данных для pre_launch и updater."""
     df = df.copy()
@@ -207,16 +212,12 @@ def prepare_dataframe(
     df_final = pd.concat([vio_df, tp_df], ignore_index=True)
     df_final["row_idx"] = range(len(df_final))
 
-    for raw_field in TOKEN_FILTER_CONFIG.raw_fields:
-        token_field = TOKEN_FILTER_CONFIG.token_field(raw_field)
-        if raw_field not in df_final.columns:
-            df_final[token_field] = [[] for _ in range(len(df_final))]
-            continue
-        df_final[token_field] = df_final[raw_field].apply(
-            lambda value: tokenize_multi_value(
-                value, separator=TOKEN_FILTER_CONFIG.raw_separator
-            )
+    if token_config is not None:
+        enriched_records = enrich_records_with_token_fields(
+            df_final.to_dict(orient="records"),
+            config=token_config,
         )
+        df_final = pd.DataFrame(enriched_records)
 
     documents = df_final["question"].astype(str).tolist()
     metadata = df_final.to_dict(orient="records")

@@ -3,8 +3,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.common.logger import AISearchLogger
-from app.common.logger import LoggerType
+from app.common.logger import AISearchLogger, LoggerType
 from app.services.hybrid_search_service import HybridSearchService
 from app.settings.config import LLMQueueSettings, Settings
 
@@ -31,9 +30,14 @@ async def test_enqueue_search_pack_contains_filters() -> None:
         queue=queue,
     )
 
-    await service.enqueue_search(query="q", top_k=3, role="Врач", product="ЭМИАС")
+    await service.enqueue_search(
+        query="q",
+        top_k=3,
+        role=["Врач"],
+        product=["ЭМИАС"],
+    )
 
     pack_raw = redis.set.await_args_list[0].args[1]
     pack = json.loads(pack_raw)
-    assert pack["role"] == "Врач"
-    assert pack["product"] == "ЭМИАС"
+    assert pack["role"] == ["Врач"]
+    assert pack["product"] == ["ЭМИАС"]
