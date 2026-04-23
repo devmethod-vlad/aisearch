@@ -37,8 +37,8 @@ class HybridSearchService(IHybridSearchService):
         self,
         query: str,
         top_k: int,
-        role: str | None = None,
-        product: str | None = None,
+        role: list[str] | None = None,
+        product: list[str] | None = None,
     ) -> TaskResponse:
         """Ставит задачу поиска в очередь."""
         ticket_id = str(uuid.uuid4())

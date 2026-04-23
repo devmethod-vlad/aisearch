@@ -4,11 +4,11 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class MultiValueTokenConfig:
-    """Единый конфиг для token-полей мультизначных метаданных."""
+    """Конфиг token-фильтрации мультизначных raw-полей."""
 
-    raw_fields: tuple[str, ...] = ("role", "product")
-    token_suffix: str = "_tokens"
-    raw_separator: str = ";"
+    raw_fields: tuple[str, ...]
+    token_suffix: str
+    raw_separator: str
 
     def token_field(self, raw_field: str) -> str:
         return f"{raw_field}{self.token_suffix}"
@@ -16,9 +16,6 @@ class MultiValueTokenConfig:
     @property
     def token_fields(self) -> tuple[str, ...]:
         return tuple(self.token_field(field) for field in self.raw_fields)
-
-
-TOKEN_FILTER_CONFIG = MultiValueTokenConfig()
 
 
 @dataclass(frozen=True)
@@ -46,25 +43,24 @@ def normalize_token(value: tp.Any) -> str:
     return str(value).strip().casefold()
 
 
-def tokenize_multi_value(
+def tokenize_record_raw_value(
     raw_value: tp.Any,
     *,
-    separator: str | None = None,
+    separator: str,
 ) -> list[str]:
-    """Разбивает сырое поле на нормализованные уникальные токены.
+    """Токенизирует raw metadata поле записи через raw-separator.
 
     Алгоритм: split -> trim/casefold -> удаление пустых -> dedup с сохранением порядка.
     """
     if raw_value is None:
         return []
 
-    sep = separator or TOKEN_FILTER_CONFIG.raw_separator
     raw_text = str(raw_value)
     if raw_text == "":
         return []
 
     unique: dict[str, None] = {}
-    for chunk in raw_text.split(sep):
+    for chunk in raw_text.split(separator):
         token = normalize_token(chunk)
         if token:
             unique.setdefault(token, None)
@@ -72,14 +68,34 @@ def tokenize_multi_value(
     return list(unique.keys())
 
 
+def normalize_request_filter_values(
+    raw_values: list[str] | tuple[str, ...] | None,
+) -> tuple[str, ...]:
+    """Нормализует значения одного входного фильтра API.
+
+    Важно: каждый элемент списка рассматривается как отдельное выбранное значение
+    и НЕ split-ится повторно по raw separator.
+    """
+    if not raw_values:
+        return ()
+
+    unique: dict[str, None] = {}
+    for value in raw_values:
+        token = normalize_token(value)
+        if token:
+            unique.setdefault(token, None)
+
+    return tuple(unique.keys())
+
+
 def build_token_fields_for_record(
     record: dict[str, tp.Any],
     *,
-    config: MultiValueTokenConfig = TOKEN_FILTER_CONFIG,
+    config: MultiValueTokenConfig,
 ) -> dict[str, list[str]]:
     """Строит token-поля для одной записи на основе raw-полей из конфига."""
     return {
-        config.token_field(raw_field): tokenize_multi_value(
+        config.token_field(raw_field): tokenize_record_raw_value(
             record.get(raw_field), separator=config.raw_separator
         )
         for raw_field in config.raw_fields
@@ -89,7 +105,7 @@ def build_token_fields_for_record(
 def enrich_records_with_token_fields(
     records: list[dict[str, tp.Any]],
     *,
-    config: MultiValueTokenConfig = TOKEN_FILTER_CONFIG,
+    config: MultiValueTokenConfig,
 ) -> list[dict[str, tp.Any]]:
     """Возвращает новый список records с добавленными token-полями."""
     enriched: list[dict[str, tp.Any]] = []
@@ -101,16 +117,14 @@ def enrich_records_with_token_fields(
 
 
 def normalize_request_token_filters(
-    raw_filters: dict[str, tp.Any],
+    raw_filters: dict[str, list[str] | None],
     *,
-    config: MultiValueTokenConfig = TOKEN_FILTER_CONFIG,
+    config: MultiValueTokenConfig,
 ) -> NormalizedTokenFilters:
     """Нормализует входные фильтры API в структуру token_field -> tuple[token]."""
     by_field: dict[str, tuple[str, ...]] = {}
     for raw_field in config.raw_fields:
-        tokens = tokenize_multi_value(
-            raw_filters.get(raw_field), separator=config.raw_separator
-        )
+        tokens = normalize_request_filter_values(raw_filters.get(raw_field))
         if tokens:
             by_field[config.token_field(raw_field)] = tuple(tokens)
     return NormalizedTokenFilters(by_token_field=by_field)
@@ -119,11 +133,11 @@ def normalize_request_token_filters(
 def build_opensearch_token_filter_clauses(
     filters: NormalizedTokenFilters,
 ) -> list[dict[str, tp.Any]]:
-    """Строит bool.filter clauses для OpenSearch term-поиска по token-полям."""
+    """Строит bool.filter clauses: OR внутри поля и AND между полями."""
     clauses: list[dict[str, tp.Any]] = []
     for token_field in sorted(filters.by_token_field):
-        for token in filters.by_token_field[token_field]:
-            clauses.append({"term": {token_field: token}})
+        should = [{"term": {token_field: token}} for token in filters.by_token_field[token_field]]
+        clauses.append({"bool": {"should": should, "minimum_should_match": 1}})
     return clauses
 
 
@@ -132,11 +146,17 @@ def _escape_milvus_string(value: str) -> str:
 
 
 def build_milvus_token_filter_expr(filters: NormalizedTokenFilters) -> str | None:
-    """Строит Milvus filter expression через ARRAY_CONTAINS(...)."""
-    terms: list[str] = []
+    """Строит Milvus expression: OR внутри поля и AND между полями."""
+    groups: list[str] = []
     for token_field in sorted(filters.by_token_field):
-        for token in filters.by_token_field[token_field]:
-            terms.append(f'ARRAY_CONTAINS({token_field}, "{_escape_milvus_string(token)}")')
-    if not terms:
+        terms = [
+            f'ARRAY_CONTAINS({token_field}, "{_escape_milvus_string(token)}")'
+            for token in filters.by_token_field[token_field]
+        ]
+        if len(terms) == 1:
+            groups.append(terms[0])
+        elif terms:
+            groups.append(f"({' OR '.join(terms)})")
+    if not groups:
         return None
-    return " AND ".join(terms)
+    return " AND ".join(groups)

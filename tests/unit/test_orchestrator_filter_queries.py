@@ -3,7 +3,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.infrastructure.utils.token_filters import normalize_request_token_filters
+from app.infrastructure.utils.token_filters import (
+    MultiValueTokenConfig,
+    normalize_request_token_filters,
+)
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 
@@ -17,11 +20,23 @@ async def test_os_candidates_builds_term_filters() -> None:
     os_adapter.search = AsyncMock(return_value=[])
     orchestrator.os_adapter = os_adapter
 
-    filters = normalize_request_token_filters({"role": "Врач"})
+    filters = normalize_request_token_filters(
+        {"role": ["Врач"]},
+        config=MultiValueTokenConfig(
+            raw_fields=("role", "product"), token_suffix="_tokens", raw_separator=";"
+        ),
+    )
     await orchestrator._os_candidates("тест", 5, filters)
 
     body = os_adapter.search.await_args.args[0]
-    assert {"term": {"role_tokens": "врач"}} in body["query"]["bool"]["filter"]
+    assert body["query"]["bool"]["filter"] == [
+        {
+            "bool": {
+                "should": [{"term": {"role_tokens": "врач"}}],
+                "minimum_should_match": 1,
+            }
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -32,7 +47,12 @@ async def test_presearch_uses_same_filter_clauses() -> None:
     os_adapter.search = AsyncMock(return_value=[])
     orchestrator.os_adapter = os_adapter
 
-    filters = normalize_request_token_filters({"product": "ЭМИАС"})
+    filters = normalize_request_token_filters(
+        {"product": ["ЭМИАС"]},
+        config=MultiValueTokenConfig(
+            raw_fields=("role", "product"), token_suffix="_tokens", raw_separator=";"
+        ),
+    )
     result = await orchestrator._presearch_exact_match(
         query="Q1",
         field_name="ext_id",
@@ -42,4 +62,11 @@ async def test_presearch_uses_same_filter_clauses() -> None:
 
     assert result is None
     first_body = os_adapter.search.await_args_list[0].args[0]
-    assert {"term": {"product_tokens": "эмиас"}} in first_body["query"]["bool"]["filter"]
+    assert first_body["query"]["bool"]["filter"] == [
+        {
+            "bool": {
+                "should": [{"term": {"product_tokens": "эмиас"}}],
+                "minimum_should_match": 1,
+            }
+        }
+    ]

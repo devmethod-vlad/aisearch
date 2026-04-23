@@ -27,13 +27,14 @@ from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
 from app.infrastructure.utils.metrics import _convert_to_ms_or_return_0, _now_ms
+from app.infrastructure.utils.nlp import hash_query, normalize_query
 from app.infrastructure.utils.token_filters import (
+    MultiValueTokenConfig,
     NormalizedTokenFilters,
     build_milvus_token_filter_expr,
     build_opensearch_token_filter_clauses,
     normalize_request_token_filters,
 )
-from app.infrastructure.utils.nlp import hash_query, normalize_query
 from app.services.interfaces import IHybridSearchOrchestrator
 from app.settings.config import Settings
 
@@ -76,6 +77,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.intermediate_results_top_k = settings.hybrid.intermediate_results_top_k
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
         self.response_metrics_enabled = settings.search_metrics.response_metrics_enabled
+        self.token_filter_config = MultiValueTokenConfig(
+            raw_fields=settings.token_filters.raw_fields,
+            token_suffix=settings.token_filters.token_suffix,
+            raw_separator=settings.token_filters.raw_separator,
+        )
 
         self.dense_metric = settings.milvus.metric_type
         self.reranker_pairs_fields = settings.reranker.pairs_fields
@@ -127,11 +133,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         switches_local = deepcopy(self.switches)
 
         raw_query = str(pack["query"]).strip()
-        raw_filters = {
-            "role": pack.get("role"),
-            "product": pack.get("product"),
+        raw_filters: dict[str, list[str] | None] = {
+            raw_field: pack.get(raw_field) for raw_field in self.token_filter_config.raw_fields
         }
-        token_filters = normalize_request_token_filters(raw_filters)
+        token_filters = normalize_request_token_filters(
+            raw_filters, config=self.token_filter_config
+        )
         self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
         filter_cache_key = token_filters.cache_key_part()
         milvus_filter_expr = build_milvus_token_filter_expr(token_filters)
