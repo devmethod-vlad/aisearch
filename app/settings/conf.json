@@ -70,6 +70,24 @@
       "nullable": true
     },
     {
+      "name": "role_tokens",
+      "dtype": "ARRAY",
+      "description": "Normalized role tokens for exact filtering",
+      "element_type": "VARCHAR",
+      "max_capacity": 32,
+      "max_length": 255,
+      "nullable": true
+    },
+    {
+      "name": "product_tokens",
+      "dtype": "ARRAY",
+      "description": "Normalized product tokens for exact filtering",
+      "element_type": "VARCHAR",
+      "max_capacity": 32,
+      "max_length": 255,
+      "nullable": true
+    },
+    {
       "name": "space",
       "dtype": "VARCHAR",
       "description": "Space or environment",
@@ -152,19 +170,51 @@
       "field_name": "embedding",
       "index_type": "HNSW",
       "metric_type": "IP",
-      "params": { "M": 16, "efConstruction": 200 }
+      "params": {
+        "M": 16,
+        "efConstruction": 200
+      }
     },
-    { "field_name": "ext_id", "index_type": "INVERTED" },
-    { "field_name": "source", "index_type": "INVERTED" },
-    { "field_name": "page_id", "index_type": "INVERTED" },
-    { "field_name": "actual", "index_type": "INVERTED" },
-    { "field_name": "role", "index_type": "INVERTED" },
-    { "field_name": "product", "index_type": "INVERTED" },
-    { "field_name": "space", "index_type": "INVERTED" },
-    { "field_name": "component", "index_type": "INVERTED" },
-    { "field_name": "for_user", "index_type": "INVERTED" }
+    {
+      "field_name": "ext_id",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "source",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "page_id",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "actual",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "role",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "product",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "space",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "component",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "for_user",
+      "index_type": "INVERTED"
+    }
   ],
   "search_params": {
-    "embedding": { "ef": 128 }
+    "embedding": {
+      "ef": 128
+    }
   }
 }

@@ -9,6 +9,7 @@ from pymilvus import (
     Collection,
     CollectionSchema,
     DataType,
+    FieldSchema,
 )
 from pymilvus.grpc_gen.common_pb2 import ConsistencyLevel
 from pymilvus.milvus_client import IndexParams
@@ -193,6 +194,74 @@ class MilvusDatabase(IVectorDatabase):
     def get_model_name(model: SentenceTransformer) -> str:
         return model._first_module().auto_model.config._name_or_path.split("/")[-1]
 
+    def _load_schema_fields(self) -> tuple[dict[str, FieldSchema], FieldSchema]:
+        fields, _, _ = load_schema_and_indexes_from_json(self.config.schema_path)
+        f_by_name = {f.name: f for f in fields}
+        vec_field = self.config.vector_field
+        if vec_field not in f_by_name:
+            raise ValueError(f"В схеме нет векторного поля '{vec_field}'")
+        return f_by_name, f_by_name[vec_field]
+
+    @staticmethod
+    def _vector_dim(field: FieldSchema) -> int | None:
+        dim = getattr(field, "dim", None)
+        if dim is not None:
+            return dim
+        params = getattr(field, "params", {}) or {}
+        return params.get("dim")
+
+    def _coerce_field_value(
+        self,
+        f_by_name: dict[str, FieldSchema],
+        name: str,
+        value: tp.Any,
+    ) -> tuple[tp.Any | None, bool]:
+        f = f_by_name.get(name)
+        if f is None or value is None:
+            return None, True
+
+        if f.dtype == DataType.VARCHAR:
+            text = str(value)
+            max_length = getattr(f, "max_length", None)
+            if max_length:
+                text = text[:max_length]
+            return text, False
+
+        if f.dtype == DataType.ARRAY:
+            if isinstance(value, str):
+                values = [value]
+            elif isinstance(value, tp.Sequence):
+                values = list(value)
+            else:
+                return None, True
+
+            element_type = getattr(f, "element_type", None)
+            max_capacity = getattr(f, "max_capacity", None)
+            if max_capacity is not None:
+                values = values[:max_capacity]
+
+            if element_type == DataType.VARCHAR:
+                element_max_length = getattr(f, "max_length", None)
+                result = []
+                for item in values:
+                    text = str(item)
+                    if element_max_length:
+                        text = text[:element_max_length]
+                    result.append(text)
+                return result, False
+            return values, False
+
+        if f.dtype in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64):
+            return int(value), False
+        if f.dtype in (DataType.FLOAT, DataType.DOUBLE):
+            return float(value), False
+        if f.dtype == DataType.BOOL:
+            return bool(value), False
+        if f.dtype == DataType.FLOAT_VECTOR:
+            return None, True
+
+        return value, False
+
     async def load_collection(self, collection_name: str) -> None:
         await self._load_collection(collection_name)
         self.__collections_loaded.add(collection_name)
@@ -266,20 +335,9 @@ class MilvusDatabase(IVectorDatabase):
                 raise ValueError("Нельзя вставить 0 векторов без метаданных")
             metadata = [{} for _ in range(vectors_size)]
 
-        fields, index_specs, search_params_by_field = load_schema_and_indexes_from_json(
-            self.config.schema_path
-        )
-        f_by_name = {f.name: f for f in fields}
-
+        f_by_name, vector_field_schema = self._load_schema_fields()
         vec_field = self.config.vector_field
-        if vec_field not in f_by_name:
-            raise ValueError(f"В схеме нет векторного поля '{vec_field}'")
-
-        vfs = f_by_name[vec_field]
-        dim = getattr(vfs, "dim", None)
-        if dim is None:
-            params = getattr(vfs, "params", {}) or {}
-            dim = params.get("dim")
+        dim = self._vector_dim(vector_field_schema)
 
         def _normalize_vector(vec: tp.Sequence[tp.Any]) -> list[float]:
             if dim is not None and len(vec) != dim:
@@ -290,30 +348,6 @@ class MilvusDatabase(IVectorDatabase):
                 raise TypeError(
                     f"Невозможно привести элементы вектора к float: {e}"
                 ) from e
-
-        def _coerce(name: str, value: tp.Any) -> tuple[tp.Any | None, bool]:
-            f = f_by_name.get(name)
-            if f is None:
-                return None, True
-            if value is None:
-                return None, True
-
-            dt = f.dtype
-            if dt == DataType.VARCHAR:
-                s = str(value)
-                max_len = getattr(f, "max_length", None)
-                if max_len:
-                    s = s[:max_len]
-                return s, False
-            if dt in (DataType.INT8, DataType.INT16, DataType.INT32, DataType.INT64):
-                return int(value), False
-            if dt in (DataType.FLOAT, DataType.DOUBLE):
-                return float(value), False
-            if dt == DataType.BOOL:
-                return bool(value), False
-            if dt == DataType.FLOAT_VECTOR:
-                return None, True
-            return value, False
 
         num_batches = (vectors_size + batch_size - 1) // batch_size
         self.logger.info(
@@ -333,7 +367,7 @@ class MilvusDatabase(IVectorDatabase):
                 item[vec_field] = _normalize_vector(vec)
 
                 for k, v in row.items():
-                    val, drop = _coerce(k, v)
+                    val, drop = self._coerce_field_value(f_by_name, k, v)
                     if not drop:
                         item[k] = val
 
@@ -348,7 +382,11 @@ class MilvusDatabase(IVectorDatabase):
         await self._flush(collection_name)
 
     async def search(
-        self, collection_name: str, query_vector: list[float], top_k: int
+        self,
+        collection_name: str,
+        query_vector: list[float],
+        top_k: int,
+        filter_expr: str | None = None,
     ) -> list[dict[str, tp.Any]]:
         top_k = max(top_k, 1)
 
@@ -362,6 +400,7 @@ class MilvusDatabase(IVectorDatabase):
             params={"metric_type": self.config.metric_type, "params": {"ef": 64}},
             limit=top_k,
             output_fields=self.config.output_fields,
+            filter=filter_expr,
         )
 
         out: list[dict[str, tp.Any]] = []
@@ -525,39 +564,14 @@ class MilvusDatabase(IVectorDatabase):
             )
             await self._flush(collection_name)
 
-        fields, _, _ = load_schema_and_indexes_from_json(self.config.schema_path)
-        f_by_name = {f.name: f for f in fields}
+        f_by_name, vector_field_schema = self._load_schema_fields()
         vec_field = self.config.vector_field
-        dim = getattr(
-            f_by_name[vec_field], "dim", f_by_name[vec_field].params.get("dim")
-        )
+        dim = self._vector_dim(vector_field_schema)
 
         def _normalize(vec: list[tp.Any]) -> list[float]:
             if len(vec) != dim:
                 raise ValueError(f"Ожидалась размерность {len(vec)}, получили {dim}")
             return [float(x) for x in vec]
-
-        def _coerce(name: str, value: tp.Any) -> tuple[tp.Any | None, bool]:
-            f = f_by_name.get(name)
-            if f is None or value is None:
-                return None, True
-            if f.dtype == DataType.VARCHAR:
-                s = str(value)
-                if getattr(f, "max_length", None):
-                    s = s[: f.max_length]
-                return s, False
-            if f.dtype in (
-                DataType.INT64,
-                DataType.INT32,
-                DataType.INT16,
-                DataType.INT8,
-            ):
-                return int(value), False
-            if f.dtype in (DataType.FLOAT, DataType.DOUBLE):
-                return float(value), False
-            if f.dtype == DataType.BOOL:
-                return bool(value), False
-            return value, False
 
         total = len(vectors)
         num_batches = (total + batch_size - 1) // batch_size
@@ -575,7 +589,7 @@ class MilvusDatabase(IVectorDatabase):
             for vec, row in zip(vec_batch, meta_batch, strict=True):
                 item: dict[str, tp.Any] = {vec_field: vec}
                 for k, v in row.items():
-                    val, drop = _coerce(k, v)
+                    val, drop = self._coerce_field_value(f_by_name, k, v)
                     if not drop:
                         item[k] = val
                 data.append(item)

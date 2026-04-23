@@ -27,6 +27,12 @@ from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
 from app.infrastructure.utils.metrics import _convert_to_ms_or_return_0, _now_ms
+from app.infrastructure.utils.token_filters import (
+    NormalizedTokenFilters,
+    build_milvus_token_filter_expr,
+    build_opensearch_token_filter_clauses,
+    normalize_request_token_filters,
+)
 from app.infrastructure.utils.nlp import hash_query, normalize_query
 from app.services.interfaces import IHybridSearchOrchestrator
 from app.settings.config import Settings
@@ -121,6 +127,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         switches_local = deepcopy(self.switches)
 
         raw_query = str(pack["query"]).strip()
+        raw_filters = {
+            "role": pack.get("role"),
+            "product": pack.get("product"),
+        }
+        token_filters = normalize_request_token_filters(raw_filters)
+        self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
+        filter_cache_key = token_filters.cache_key_part()
+        milvus_filter_expr = build_milvus_token_filter_expr(token_filters)
         # ---- Short settings ----
         if self.short.mode:
             sh_start = time.perf_counter()
@@ -188,9 +202,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 presearch_enabled = bool(settings_local.presearch_enabled)
                 presearch_field = settings_local.presearch_field
-                presearch_key = f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
+                presearch_key = (
+                    f"{int(presearch_enabled)}:{presearch_field}:"
+                    f"{hash_query(raw_query)}:{filter_cache_key}"
+                )
                 cache_key = (
-                    f"hyb:{query_hash}:{top_k}:{settings_local.version}:{presearch_key}"
+                    f"hyb:{query_hash}:{top_k}:{settings_local.version}:"
+                    f"{presearch_key}"
                 )
                 cached = await self.redis.get(cache_key) if self.use_cache else None
 
@@ -211,6 +229,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             query=raw_query,
                             field_name=presearch_field,
                             use_ce=switches_local.use_reranker,
+                            token_filters=token_filters,
                         )
                         metrics["presearch_time"] = self._metrics_logger(
                             "🕒 Presearch (exact match)", presearch_start
@@ -239,6 +258,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             collection_name=settings_local.collection_name,
                             query_vector=query_vector,
                             top_k=settings_local.dense_top_k,
+                            filter_expr=milvus_filter_expr,
                         )
                         for d in res:
                             d["score_dense"] = self._dense_to_unit(
@@ -257,7 +277,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         if switches_local.use_hybrid:
                             if switches_local.use_opensearch:
                                 res = await self._os_candidates(
-                                    query, settings_local.lex_top_k
+                                    query=query,
+                                    k=settings_local.lex_top_k,
+                                    token_filters=token_filters,
                                 )
                             else:
                                 res = []
@@ -437,15 +459,26 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     "🕒 Queue ACK", ack_start
                 )
 
-    async def _os_candidates(self, query: str, k: int) -> list[dict[str, tp.Any]]:
+    async def _os_candidates(
+        self,
+        query: str,
+        k: int,
+        token_filters: NormalizedTokenFilters,
+    ) -> list[dict[str, tp.Any]]:
         os_adapter = self.os_adapter
+        filter_clauses = build_opensearch_token_filter_clauses(token_filters)
         body = {
             "query": {
-                "multi_match": {
-                    "query": query,
-                    "fields": os_adapter.config.search_fields,
-                    "operator": os_adapter.config.operator,
-                    "fuzziness": os_adapter.config.fuzziness,
+                "bool": {
+                    "must": {
+                        "multi_match": {
+                            "query": query,
+                            "fields": os_adapter.config.search_fields,
+                            "operator": os_adapter.config.operator,
+                            "fuzziness": os_adapter.config.fuzziness,
+                        }
+                    },
+                    "filter": filter_clauses,
                 }
             }
         }
@@ -492,6 +525,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         field_name: str,
         *,
         use_ce: bool,
+        token_filters: NormalizedTokenFilters,
     ) -> dict[str, tp.Any] | None:
         """Ищет один точный (без учета регистра) результат по заданному полю OpenSearch.
 
@@ -506,6 +540,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         output_fields = os_adapter.config.output_fields
 
         query_folded = query.casefold()
+        filter_clauses = build_opensearch_token_filter_clauses(token_filters)
 
         # 1) Наиболее надежный путь: script query по doc-values (обычно keyword).
         # Не зависит от поддержки `case_insensitive` в term-query для конкретной версии OS.
@@ -542,6 +577,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "bool": {
                     "minimum_should_match": 1,
                     "should": script_should,
+                    "filter": filter_clauses,
                 }
             }
         }
@@ -570,6 +606,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "bool": {
                     "minimum_should_match": 1,
                     "should": should_terms,
+                    "filter": filter_clauses,
                 }
             }
         }
@@ -583,7 +620,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 return self._build_presearch_item(hit, output_fields, use_ce=use_ce)
 
         # Fallback: расширяем окно кандидатов и фильтруем exact-match локально.
-        fallback_body = {"query": {"match_phrase": {field_name: {"query": query}}}}
+        fallback_body = {
+            "query": {
+                "bool": {
+                    "must": {"match_phrase": {field_name: {"query": query}}},
+                    "filter": filter_clauses,
+                }
+            }
+        }
         fallback_hits = await os_adapter.search(fallback_body, 20)
         for hit in fallback_hits:
             if self._is_case_insensitive_exact_match(

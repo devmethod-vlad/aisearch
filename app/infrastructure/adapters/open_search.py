@@ -509,28 +509,11 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         props = self.os_schema.mappings.get("properties") or {}
         type_of: dict[str, str] = {k: (v.get("type") or "") for k, v in props.items()}
 
-        def coerce(field: str, value: tp.Any) -> tp.Any:
-            t = type_of.get(field, "")
-            if value is None:
-                return None
-            try:
-                if t in ("keyword", "text"):
-                    return str(value)
-                if t in ("integer", "short", "byte", "long"):
-                    return int(value)
-                if t in ("float", "half_float", "scaled_float", "double"):
-                    return float(value)
-                if t == "boolean":
-                    return bool(value)
-                return value
-            except Exception:
-                return None
-
         def gen_actions() -> tp.Iterator[dict[str, tp.Any]]:
             for row in data:
                 # Создаем документ, конвертируя значения в соответствии с типами
                 doc = {
-                    field: coerce(field, value)
+                    field: self._coerce_for_mapping(field, value, type_of)
                     for field, value in row.items()
                     if field in type_of
                 }
@@ -569,27 +552,10 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         props = self.os_schema.mappings.get("properties", {})
         type_of: dict[str, str] = {k: (v.get("type") or "") for k, v in props.items()}
 
-        def coerce(field: str, value: tp.Any) -> tp.Any:
-            t = type_of.get(field, "")
-            if value is None:
-                return None
-            try:
-                if t in ("keyword", "text"):
-                    return str(value)
-                if t in ("integer", "short", "byte", "long"):
-                    return int(value)
-                if t in ("float", "half_float", "scaled_float", "double"):
-                    return float(value)
-                if t == "boolean":
-                    return bool(value)
-                return value
-            except Exception:
-                return None
-
         def gen_actions() -> tp.Iterator[dict[str, tp.Any]]:
             for row in data:
                 doc = {
-                    field: coerce(field, value)
+                    field: self._coerce_for_mapping(field, value, type_of)
                     for field, value in row.items()
                     if field in type_of
                 }
@@ -623,6 +589,35 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         await os_helpers.async_bulk(
             self.client, gen_actions(), chunk_size=chunk_size, request_timeout=120
         )
+
+    def _coerce_for_mapping(
+        self,
+        field: str,
+        value: tp.Any,
+        type_of: dict[str, str],
+    ) -> tp.Any:
+        """Приведение типа для bulk операций с поддержкой массивов строк."""
+        field_type = type_of.get(field, "")
+        if value is None:
+            return None
+
+        if isinstance(value, list):
+            if field_type in ("keyword", "text"):
+                return [str(item) for item in value if item is not None]
+            return value
+
+        try:
+            if field_type in ("keyword", "text"):
+                return str(value)
+            if field_type in ("integer", "short", "byte", "long"):
+                return int(value)
+            if field_type in ("float", "half_float", "scaled_float", "double"):
+                return float(value)
+            if field_type == "boolean":
+                return bool(value)
+            return value
+        except Exception:
+            return None
 
     def _load_os_schema_from_json(self, path: str) -> OSIndexSchema:
         with open(path, encoding="utf-8") as f:

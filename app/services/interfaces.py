@@ -35,7 +35,13 @@ class IHybridSearchService(abc.ABC):
     """Сервис гибридного поиска"""
 
     @abc.abstractmethod
-    async def enqueue_search(self, query: str, top_k: int) -> TaskResponse:
+    async def enqueue_search(
+        self,
+        query: str,
+        top_k: int,
+        role: str | None = None,
+        product: str | None = None,
+    ) -> TaskResponse:
         """постановка задачи поиска по документам в очередь"""
         pass
 
