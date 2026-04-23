@@ -184,6 +184,9 @@ async def prepare_and_load_data(
 
         logger.info("Подготовка финального датафрейма...")
         try:
+            # Используем тот же settings-driven конфиг, что и в updater/orchestrator,
+            # чтобы token-поля были консистентны между первичной и инкрементальной
+            # загрузкой, а также runtime-фильтрацией.
             token_filter_config = MultiValueTokenConfig(
                 raw_fields=settings.token_filters.raw_fields,
                 token_suffix=settings.token_filters.token_suffix,

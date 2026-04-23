@@ -596,12 +596,19 @@ class OpenSearchAdapter(IOpenSearchAdapter):
         value: tp.Any,
         type_of: dict[str, str],
     ) -> tp.Any:
-        """Приведение типа для bulk операций с поддержкой массивов строк."""
+        """Приводит значение поля к типу, ожидаемому mapping OpenSearch.
+
+        Используется в `_os_bulk_index` и `_os_bulk_upsert` перед отправкой
+        документов в bulk API. Ключевой момент для token-полей: `list[str]`
+        должен остаться массивом строк, а не сериализоваться в строку вида
+        `"['a', 'b']"`, иначе `term`-фильтрация по массивам работать не будет.
+        """
         field_type = type_of.get(field, "")
         if value is None:
             return None
 
         if isinstance(value, list):
+            # Для keyword/text OpenSearch корректно индексирует массивы строк.
             if field_type in ("keyword", "text"):
                 return [str(item) for item in value if item is not None]
             return value

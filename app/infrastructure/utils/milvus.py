@@ -30,10 +30,16 @@ class IndexSpec:
 def load_schema_and_indexes_from_json(
     path: str,
 ) -> tuple[list[FieldSchema], list[IndexSpec], dict[str, dict[str, tp.Any]]]:
-    """Возвращает (fields, indexes, search_params_by_field).
+    """Парсит JSON-схему Milvus в структуры для создания коллекции и индексов.
+
+    Возвращает `(fields, indexes, search_params_by_field)`.
     - fields: список FieldSchema для CollectionSchema
     - indexes: список IndexSpec для create_index
     - search_params_by_field: мапа { field_name -> dict с поисковыми параметрами }
+
+    Используется в `MilvusDatabase.create_collection` и при подготовке coercion
+    в insert/upsert. Поддерживает ARRAY-поля (в т.ч. ARRAY[VARCHAR]) с
+    параметрами `element_type`, `max_capacity`, `max_length`.
     """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -63,6 +69,7 @@ def load_schema_and_indexes_from_json(
         if dtype == DataType.VARCHAR:
             kwargs["max_length"] = raw_field.get("max_length", 255)
         elif dtype == DataType.ARRAY:
+            # Поддержка массивов нужна для token-полей вида `*_tokens`.
             element_type_name = raw_field.get("element_type")
             if not element_type_name:
                 raise ValueError(

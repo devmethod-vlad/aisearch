@@ -54,6 +54,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         logger: AISearchLogger,
         uow: IUnitOfWork,
     ):
+        """Инициализирует зависимости и настройки pipeline гибридного поиска.
+
+        Здесь же собирается `MultiValueTokenConfig`, который далее используется
+        в `documents_search` для нормализации входных фильтров и построения
+        backend-специфичных условий (OpenSearch/Milvus).
+        """
         self.queue = queue
         self.sem = sem
         self.vector_db = vector_db
@@ -100,7 +106,15 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         pack_key: str,
         result_key: str,
     ) -> dict[str, str]:
-        """Поиск по документам с логированием и сбором всех метрик."""
+        """Запускает полный pipeline гибридного поиска по задаче из очереди.
+
+        Ключевые этапы: чтение pack из Redis, нормализация query/filters,
+        presearch, dense+lex поиск, merge/rerank, кеширование и запись ответа.
+        Token-фильтры применяются синхронно во всех ветках поиска:
+        - векторный поиск (Milvus `filter_expr`);
+        - lexical/presearch поиск (OpenSearch `bool.filter`);
+        - cache key (детерминированная часть по фильтрам).
+        """
         start_total = time.perf_counter()
         metrics: dict[str, float] = {}
 
@@ -136,10 +150,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         raw_filters: dict[str, list[str] | None] = {
             raw_field: pack.get(raw_field) for raw_field in self.token_filter_config.raw_fields
         }
+        # Нормализация фильтров в терминах token-полей (role_tokens и т.п.).
         token_filters = normalize_request_token_filters(
             raw_filters, config=self.token_filter_config
         )
         self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
+        # Фильтры участвуют в cache key, чтобы кеш не смешивал разные срезы данных.
         filter_cache_key = token_filters.cache_key_part()
         milvus_filter_expr = build_milvus_token_filter_expr(token_filters)
         # ---- Short settings ----
@@ -472,6 +488,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         k: int,
         token_filters: NormalizedTokenFilters,
     ) -> list[dict[str, tp.Any]]:
+        """Получает lexical-кандидатов из OpenSearch с учётом token-фильтров.
+
+        Используется внутри `documents_search` как lexical ветка гибридного
+        поиска. Фильтры передаются через `build_opensearch_token_filter_clauses`
+        с семантикой OR внутри поля и AND между полями.
+        """
         os_adapter = self.os_adapter
         filter_clauses = build_opensearch_token_filter_clauses(token_filters)
         body = {
@@ -535,6 +557,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         token_filters: NormalizedTokenFilters,
     ) -> dict[str, tp.Any] | None:
         """Ищет один точный (без учета регистра) результат по заданному полю OpenSearch.
+
+        Используется в `documents_search` перед основным dense/lex этапом.
+        Важно, что сюда прокидываются те же token-фильтры, что и в основной
+        поиск, иначе presearch мог бы вернуть документ из неверного среза.
 
         Важный момент: в разных схемах индекса `term + case_insensitive` может
         срабатывать только на части полей, поэтому используем двухэтапный подход:
