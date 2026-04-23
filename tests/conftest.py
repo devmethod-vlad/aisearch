@@ -1,158 +1,201 @@
 import asyncio
-import logging
-import typing as tp
-from pathlib import Path
+from collections.abc import AsyncGenerator
 
-import pandas as pd
 import pytest
-from pymilvus import MilvusException
+from faker import Faker
+from httpx import ASGITransport, AsyncClient
+from redis.asyncio import from_url
+from redis.asyncio.client import Pipeline, Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from testcontainers.postgres import PostgresContainer
+from testcontainers.redis import RedisContainer
+from yoyo import get_backend, read_migrations
 
-from app.infrastructure.adapters.open_search import OpenSearchAdapter
-from app.infrastructure.storages.milvus import MilvusDatabase
-from app.infrastructure.utils.universal import get_system_root, settings_to_env_vars
-from app.services.updater import UpdaterService
-from app.settings.config import Settings
-from tests.mocks.edu import MockEduAdapter
-from tests.utils import cleanup_milvus, cleanup_opensearch
+from app.common.database import Database
+from app.common.exceptions.exceptions import RedisConnectionError
+from app.common.redis import RedisHelper
+from app.dependencies.dependencies import (
+    get_db,
+    get_redis,
+    get_uow,
+)
+from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
+from app.infrastructure.unit_of_work.uow import UnitOfWork
+from app.main import app
+from app.services.glossary import GlossaryService
+from app.services.interfaces import IGlossaryService
+from app.settings.config import RedisSettings, Settings
 
-pytest_plugins = ["tests.fixtures.containers", "tests.fixtures.settings"]
-
-
-@pytest.fixture(scope="session", autouse=True)
-def suppress_unwanted_logs():
-    """Подавляем ненужные логи для тестовой сессии"""
-    logging.getLogger("opensearch").setLevel(logging.ERROR)
-    logging.getLogger("urllib3").setLevel(logging.ERROR)
+pytest_plugins = ("tests.fixtures.glossary_element",)
 
 
 @pytest.fixture(scope="session")
-def event_loop() -> tp.Generator[asyncio.AbstractEventLoop, None, None]:
-    loop = asyncio.new_event_loop()
+def event_loop():
+    """Overrides pytest default function scoped event loop"""
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
     yield loop
     loop.close()
 
 
+@pytest.fixture()
+def faker() -> Faker:
+    """Фикстура для наполнения тестовых данных"""
+    return Faker()
+
+
 @pytest.fixture(scope="session")
-async def milvus_database(
-    test_milvus_settings,
-) -> tp.AsyncGenerator[MilvusDatabase, None]:
-    """MilvusDatabase для всей сессии тестов"""
-    from app.common.logger import AISearchLogger, LoggerType
+def anyio_backend() -> str:
+    """Фикстура для настройки anyio."""
+    return "asyncio"
 
-    database = MilvusDatabase(
-        test_milvus_settings, AISearchLogger(logger_type=LoggerType.TEST)
+
+@pytest.fixture(scope="session")
+def settings() -> Settings:
+    """Фикстура настроек"""
+    return Settings()
+
+
+@pytest.fixture
+def valid_token(settings: Settings) -> str:
+    """Фикстура для корректного токена."""
+    return settings.app.access_key
+
+
+class TestDatabase:
+    """Вспомогательный класс для работы с тестовой БД"""
+
+    def __init__(self, dsn: str):
+        self.engine = create_async_engine(url=str(dsn), echo=False, pool_size=5, max_overflow=10)
+
+        self.session_factory = async_sessionmaker(
+            bind=self.engine,
+            autoflush=False,
+            autocommit=False,
+            expire_on_commit=False,
+        )
+
+
+@pytest.fixture(scope="session")
+async def db() -> AsyncGenerator[Database]:
+    """Фикстура для инициализации тестовой базы данных."""
+    container = PostgresContainer("postgres:13.4-alpine")
+    container.start()
+
+    test_db_url = (
+        f"postgresql+asyncpg://{container.username}:{container.password}@"
+        f"{container.get_container_host_ip()}:{container.get_exposed_port(5432)}/{container.dbname}"
     )
+    database = TestDatabase(dsn=test_db_url)
 
-    try:
-        await database._has_collection("test_connection")
-    except MilvusException as e:
-        pytest.fail(f"Не удалось подключиться к Milvus: {e}")
+    backend = get_backend(test_db_url.replace("postgresql+asyncpg", "postgresql"))
+    migrations = read_migrations("app/infrastructure/migrations")
+    assert migrations
+
+    with backend.lock():
+        backend.apply_migrations(backend.to_apply(migrations))
 
     yield database
-    await database.close()
+    container.stop()
 
 
-@pytest.fixture(scope="session")
-async def opensearch_adapter(
-    test_settings: Settings,
-) -> tp.AsyncGenerator[OpenSearchAdapter, None]:
-    """OpenSearchAdapter для всей сессии тестов"""
-    from app.common.logger import AISearchLogger, LoggerType
+@pytest.fixture()
+async def db_session(db: Database) -> AsyncGenerator[AsyncSession]:
+    """Фикстура для создания изолированной сессии для каждого теста."""
+    async with db.session_factory() as session, session.begin():
+        yield session
+        await session.rollback()
 
-    adapter = OpenSearchAdapter(
-        test_settings, AISearchLogger(logger_type=LoggerType.TEST)
-    )
 
-    try:
-        health = await adapter.client.cluster.health(
-            wait_for_status="yellow", timeout=30
+class TestRedisHelper:
+    """Вспомогательный класс для работы с тестовым Redis"""
+
+    def __init__(self, config: RedisSettings, url: str):
+        self.config: RedisSettings = config
+        self.connection: Redis = from_url(
+            url,
+            socket_connect_timeout=config.connect_timeout,
+            socket_timeout=config.timeout,
+            decode_responses=True,
         )
-        if health["status"] not in ("yellow", "green"):
-            pytest.fail(f"OpenSearch не готов: статус {health['status']}")
-    except Exception as e:
-        pytest.fail(f"Не удалось подключиться к OpenSearch: {e}")
 
-    yield adapter
-    await adapter.close()
-
-
-@pytest.fixture()
-async def clean_databases(
-    milvus_database: MilvusDatabase,
-    opensearch_adapter: OpenSearchAdapter,
-    test_milvus_settings,
-    test_opensearch_settings,
-) -> None:
-    """Очищает тестовые данные перед тестом"""
-    await cleanup_milvus(milvus_database, test_milvus_settings.collection_name)
-    await cleanup_opensearch(opensearch_adapter, test_opensearch_settings.index_name)
+    async def pipe(self) -> Pipeline:
+        """Получение redis pipeline с предварительной проверкой на доступ к redis"""
+        try:
+            await self.connection.ping()
+        except (TimeoutError, ConnectionError):
+            raise RedisConnectionError
+        else:
+            return self.connection.pipeline(transaction=True)
 
 
 @pytest.fixture()
-def pre_launch_env_vars(
-    test_settings: Settings,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> dict[str, str]:
-    """Переменные окружения для запуска pre_launch.py"""
-    tmp_path = tmp_path_factory.mktemp("pre_launch_test")
-
-    log_path = tmp_path / "pre_launch.log"
-    celery_log_path = tmp_path / "celery.log"
-    nltk_data_path = tmp_path / "nltk_data"
-
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    celery_log_path.parent.mkdir(parents=True, exist_ok=True)
-    nltk_data_path.mkdir(parents=True, exist_ok=True)
-
-    env_vars = settings_to_env_vars(test_settings)
-
-    env_vars["SYSTEMROOT"] = get_system_root()
-    env_vars["PYTHONIOENCODING"] = "utf-8"
-    env_vars["PYTHONUTF8"] = "1"
-
-    env_vars.update(
-        {
-            "APP_RECREATE_DATA": "true",
-            "LOG_PATH": str(log_path),
-            "CELERY_LOGS_PATH": str(celery_log_path),
-            "NLTK_DATA": str(nltk_data_path),
-        }
-    )
-
-    return env_vars
+async def redis(settings: Settings) -> AsyncGenerator[RedisHelper]:
+    """Фикстура для создания тестового подключения к Redis."""
+    container = RedisContainer("redis:7.4.2-alpine")
+    container.start()
+    host = container.get_container_host_ip()
+    port = container.get_exposed_port(6379)
+    yield TestRedisHelper(config=settings.redis, url=f"redis://{host}:{port}")
+    container.stop()
 
 
 @pytest.fixture()
-def prelaunch_updater_correct_result_df() -> pd.DataFrame:
-    """Ожидаемый результат после обработки файлов"""
-    expected_file = (
-        Path(__file__).parent / "mocks" / "prelaunch_updater_correct_result.xlsx"
-    )
-    if not expected_file.exists():
-        pytest.skip(f"Файл с ожидаемым результатом не найден: {expected_file}")
-    return pd.read_excel(expected_file)
+async def override_app_dependencies(db: Database, redis: RedisHelper) -> AsyncGenerator[None, None]:
+    """Переопределение зависимостей приложения на тестовые ресурсы."""
+
+    async def override_get_db() -> AsyncGenerator[Database, None]:
+        yield db
+
+    async def override_get_uow() -> AsyncGenerator[IUnitOfWork, None]:
+        yield UnitOfWork(db)
+
+    async def override_get_redis() -> AsyncGenerator[RedisHelper, None]:
+        yield redis
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_uow] = override_get_uow
+    app.dependency_overrides[get_redis] = override_get_redis
+
+    yield
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+async def cleanup_glossary_elements(db: Database) -> AsyncGenerator[None, None]:
+    """Очистка таблицы glossary_element для изоляции тестовых данных."""
+
+    async def clear() -> None:
+        async with db.session_factory() as session:
+            await session.execute(text("TRUNCATE TABLE glossary_element RESTART IDENTITY CASCADE"))
+            await session.commit()
+
+    await clear()
+    yield
+    await clear()
 
 
 @pytest.fixture()
-def mock_edu_adapter() -> MockEduAdapter:
-    return MockEduAdapter()
+async def glossary_service(
+    db: Database,
+    redis: RedisHelper,
+    override_app_dependencies,
+) -> AsyncGenerator[IGlossaryService, None]:
+    """Фикстура для тестового сервиса глоссария с переопределенной базой данных."""
+    service = GlossaryService(UnitOfWork(db), redis)
+
+    return service
 
 
 @pytest.fixture()
-def updater_service(
-    test_settings: Settings,
-    mock_edu_adapter: MockEduAdapter,
-    milvus_database: MilvusDatabase,
-    opensearch_adapter: OpenSearchAdapter,
-) -> UpdaterService:
-    """Создает экземпляр UpdaterService для тестов"""
-    from app.common.logger import AISearchLogger, LoggerType
-    from app.services.updater import UpdaterService
-
-    return UpdaterService(
-        settings=test_settings,
-        logger=AISearchLogger(logger_type=LoggerType.TEST),
-        edu=mock_edu_adapter,
-        milvus=milvus_database,
-        os=opensearch_adapter,
-    )
+async def client(
+    override_app_dependencies,
+) -> AsyncGenerator[AsyncClient]:
+    """Фикстура для тестового клиента FastAPI с тестовыми зависимостями."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as test_client:
+        yield test_client
