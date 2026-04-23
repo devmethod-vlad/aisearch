@@ -160,7 +160,14 @@ class HybridSearchSettings(EnvBaseSettings):
 
 
 class TokenFiltersSettings(EnvBaseSettings):
-    """Настройки token-фильтрации мультизначных полей."""
+    """Настройки token-фильтрации мультизначных полей.
+
+    Настройки вынесены в env, чтобы расширять список фильтруемых полей
+    (например, `role`, `product`) без хардкода в сервисах поиска/индексации.
+    Эти параметры используются при создании `MultiValueTokenConfig` в:
+    - `pre_launch` и `UpdaterService` (ingestion enrichment);
+    - `HybridSearchOrchestrator` (runtime нормализация фильтров).
+    """
 
     env_separator: str = ","
     raw_fields: tuple[str, ...] = ()
@@ -172,6 +179,12 @@ class TokenFiltersSettings(EnvBaseSettings):
     def parse_raw_fields(
         cls, v: tp.Any, info: ValidationInfo
     ) -> tuple[str, ...]:
+        """Парсит `raw_fields` из env в кортеж имён полей.
+
+        Поддерживает строку с разделителем `env_separator` и коллекции
+        значений. Нормализация здесь ограничивается trim/приведением к str:
+        порядок полей сохраняется, чтобы конфигурация оставалась предсказуемой.
+        """
         separator = info.data.get("env_separator", ",")
 
         if isinstance(v, str):

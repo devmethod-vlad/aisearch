@@ -195,6 +195,11 @@ class MilvusDatabase(IVectorDatabase):
         return model._first_module().auto_model.config._name_or_path.split("/")[-1]
 
     def _load_schema_fields(self) -> tuple[dict[str, FieldSchema], FieldSchema]:
+        """Загружает и валидирует поля схемы Milvus из JSON-конфига.
+
+        Используется перед insert/upsert, чтобы coercion метаданных опирался на
+        фактические типы полей коллекции (включая ARRAY[VARCHAR]).
+        """
         fields, _, _ = load_schema_and_indexes_from_json(self.config.schema_path)
         f_by_name = {f.name: f for f in fields}
         vec_field = self.config.vector_field
@@ -204,6 +209,7 @@ class MilvusDatabase(IVectorDatabase):
 
     @staticmethod
     def _vector_dim(field: FieldSchema) -> int | None:
+        """Возвращает размерность векторного поля из совместимых атрибутов."""
         dim = getattr(field, "dim", None)
         if dim is not None:
             return dim
@@ -216,6 +222,13 @@ class MilvusDatabase(IVectorDatabase):
         name: str,
         value: tp.Any,
     ) -> tuple[tp.Any | None, bool]:
+        """Приводит значение метаданных к типу FieldSchema.
+
+        Применяется в `insert_vectors` и `upsert_vectors`. Для ARRAY-полей
+        учитывает ограничения `element_type`, `max_capacity`, `max_length`.
+        Возвращает `(value, drop)`, где `drop=True` означает, что поле нужно
+        пропустить (несовместимый тип, None или неподдерживаемое преобразование).
+        """
         f = f_by_name.get(name)
         if f is None or value is None:
             return None, True
@@ -228,6 +241,8 @@ class MilvusDatabase(IVectorDatabase):
             return text, False
 
         if f.dtype == DataType.ARRAY:
+            # ARRAY в схеме может приходить как одиночная строка либо как
+            # последовательность; приводим к списку и ограничиваем ёмкость.
             if isinstance(value, str):
                 values = [value]
             elif isinstance(value, tp.Sequence):
@@ -388,6 +403,11 @@ class MilvusDatabase(IVectorDatabase):
         top_k: int,
         filter_expr: str | None = None,
     ) -> list[dict[str, tp.Any]]:
+        """Выполняет векторный поиск в Milvus с опциональным filter expression.
+
+        `filter_expr` приходит из token-фильтров оркестратора и позволяет
+        применять те же ограничения по metadata, что и в OpenSearch-ветке.
+        """
         top_k = max(top_k, 1)
 
         if collection_name not in self.__collections_loaded:

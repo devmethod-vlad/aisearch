@@ -169,7 +169,14 @@ def prepare_dataframe(
     id_column: str,
     token_config: MultiValueTokenConfig | None = None,
 ) -> tuple[list[str], list[dict], pd.DataFrame]:
-    """Унифицированная очистка/фильтрация данных для pre_launch и updater."""
+    """Унифицированная очистка и enrichment данных для ingestion-пайплайна.
+
+    Функция используется в двух потоках загрузки:
+    - `pre_launch.prepare_and_load_data` (первичная инициализация);
+    - `UpdaterService.update_*` (инкрементальные обновления).
+    За счёт этого правила фильтрации и формирования token-полей остаются
+    одинаковыми для обеих БД (Milvus/OpenSearch) и обоих путей ingestion.
+    """
     df = df.copy()
 
     if "page_id" in df.columns:
@@ -213,6 +220,8 @@ def prepare_dataframe(
     df_final["row_idx"] = range(len(df_final))
 
     if token_config is not None:
+        # Централизованный enrichment token-полей: одна точка истины для
+        # pre_launch и updater, чтобы индексация оставалась согласованной.
         enriched_records = enrich_records_with_token_fields(
             df_final.to_dict(orient="records"),
             config=token_config,

@@ -39,6 +39,7 @@ class UpdaterService(IUpdaterService):
         self.model: SentenceTransformer | None = None
         self.field_mapping = load_field_mapping(settings.app.field_mapping_schema_path)
         self.id_column = settings.app.data_unique_id
+        # Единый конфиг токенизации для updater/pre_launch/runtime-фильтров.
         self.token_filter_config = MultiValueTokenConfig(
             raw_fields=settings.token_filters.raw_fields,
             token_suffix=settings.token_filters.token_suffix,
@@ -256,6 +257,7 @@ class UpdaterService(IUpdaterService):
             id_column=self.id_column,
             token_config=self.token_filter_config,
         )
+        # prepare_dataframe централизованно добавляет token-поля перед upsert.
         await self._update_collection_from_df(df_prepared, target_source="ВиО")
 
         cleanup_resources(self.logger)
@@ -275,6 +277,7 @@ class UpdaterService(IUpdaterService):
             id_column=self.id_column,
             token_config=self.token_filter_config,
         )
+        # Те же правила enrichment, что и для ВиО/полной загрузки.
         await self._update_collection_from_df(df_prepared, target_source="ТП")
 
         cleanup_resources(self.logger)
