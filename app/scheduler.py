@@ -12,7 +12,7 @@ from app.infrastructure.providers import (
     RedisProvider,
 )
 from app.infrastructure.storages.milvus_provider import MilvusProvider
-from app.services.interfaces import IUpdaterService
+from app.services.interfaces import IGlossaryService, IUpdaterService
 from app.settings.config import (
     AppSettings,
     HybridSearchSettings,
@@ -53,6 +53,13 @@ async def update_all_sources(
         logger.error("⚠️ Обновление источников не было завершено")
 
 
+async def sync_glossary(service: IGlossaryService, logger: logging.Logger) -> None:
+    """Синхронизирует глоссарий аббревиатур из внешнего API в PostgreSQL."""
+    logger.info("Синхронизация глоссария ...")
+    count = await service.sync_glossary()
+    logger.info("Синхронизация глоссария завершена, элементов: %s", count)
+
+
 async def main() -> None:
     """Точка входа для шедулера"""
     setup_logging()
@@ -76,6 +83,7 @@ async def main() -> None:
     logger = await container.get(AISearchLogger)
     logger.info("Запуск планировщика")
     service = await container.get(IUpdaterService)
+    glossary_service = await container.get(IGlossaryService)
     edu_adapter = await container.get(IEduAdapter)
     scheduler = AsyncIOScheduler(
         job_defaults={
@@ -94,6 +102,20 @@ async def main() -> None:
             hour=hour,
             minute=minute,
             args=(service, edu_adapter, logger),
+            name=task_name,
+            id=task_name,
+            replace_existing=True,
+        )
+
+    for time_str in settings.glossary.cron_update_times.split(","):
+        hour, minute = map(int, time_str.strip().split(":"))
+        task_name = f"sync_glossary_{hour:02d}_{minute:02d}"
+        scheduler.add_job(
+            sync_glossary,
+            "cron",
+            hour=hour,
+            minute=minute,
+            args=(glossary_service, logger),
             name=task_name,
             id=task_name,
             replace_existing=True,

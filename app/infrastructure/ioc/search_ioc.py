@@ -6,9 +6,11 @@ from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.common.storages.redis import RedisStorage
 from app.infrastructure.adapters.cross_encoder import CrossEncoderAdapter
 from app.infrastructure.adapters.edu import EduAdapter
+from app.infrastructure.adapters.glossary import GlossaryAdapter
 from app.infrastructure.adapters.interfaces import (
     ICrossEncoderAdapter,
     IEduAdapter,
+    IGlossaryAdapter,
     IOpenSearchAdapter,
     IRedisSemaphore,
 )
@@ -22,9 +24,11 @@ from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
 from app.infrastructure.unit_of_work.uow import UnitOfWork
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 from app.services.interfaces import (
+    IGlossaryService,
     IHybridSearchOrchestrator,
     IUpdaterService,
 )
+from app.services.glossary import GlossaryService
 from app.services.updater import UpdaterService
 from app.settings.config import (
     AppSettings,
@@ -56,7 +60,13 @@ class ApplicationProvider(Provider):
         CrossEncoderAdapter, scope=Scope.APP, provides=ICrossEncoderAdapter
     )
     edu_adapter = provide(EduAdapter, scope=Scope.APP, provides=IEduAdapter)
+    glossary_adapter = provide(
+        GlossaryAdapter, scope=Scope.APP, provides=IGlossaryAdapter
+    )
     update_service = provide(UpdaterService, scope=Scope.APP, provides=IUpdaterService)
+    glossary_service = provide(
+        GlossaryService, scope=Scope.APP, provides=IGlossaryService
+    )
     milvus_database = provide(MilvusDatabase, scope=Scope.APP, provides=IVectorDatabase)
 
     hybrid_search_orchestrator = provide(

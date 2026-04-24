@@ -9,6 +9,7 @@ from app.settings.config import (
     AppSettings,
     CelerySettings,
     ExtractEduSettings,
+    GlossarySettings,
     HybridSearchSettings,
     LLMGlobalSemaphoreSettings,
     LLMQueueSettings,
@@ -44,6 +45,7 @@ def test_settings(
     test_slowapi_settings: SlowAPISettings,
     test_search_metrics_settings: SearchMetricsEnabled,
     test_extract_edu_settings: ExtractEduSettings,
+    test_glossary_settings: GlossarySettings,
     test_short_settings: ShortSettings,
     test_token_filters_settings: TokenFiltersSettings,
 ) -> Settings:
@@ -64,6 +66,7 @@ def test_settings(
         slowapi=test_slowapi_settings,
         search_metrics=test_search_metrics_settings,
         extract_edu=test_extract_edu_settings,
+        glossary=test_glossary_settings,
         postgres=test_database_settings,
         short_settings=test_short_settings,
         token_filters=test_token_filters_settings,
@@ -341,6 +344,22 @@ def test_short_settings() -> ShortSettings:
         w_ce=0.6,
         w_dense=0.25,
         w_lex=0.15,
+    )
+
+
+@pytest.fixture(scope="session")
+def test_glossary_settings() -> GlossarySettings:
+    """Настройки синхронизации глоссария для тестов."""
+    return GlossarySettings(
+        api_url="http://test.glossary/api",
+        page_limit=500,
+        cron_update_times="03:30",
+        request_timeout=30,
+        max_retries=5,
+        retry_backoff_base_seconds=1.0,
+        retry_backoff_max_seconds=30.0,
+        abbreviation_delimiter=";",
+        term_delimiter=";",
     )
 
 

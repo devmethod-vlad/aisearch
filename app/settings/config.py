@@ -18,6 +18,25 @@ class EnvBaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
 
+def _validate_cron_update_times(v: str) -> str:
+    """Валидирует строку расписания в формате HH:MM[,HH:MM]."""
+    if not v:
+        raise ValueError("cron_update_times не может быть пустой строкой")
+
+    for time_str in v.split(","):
+        time_s = time_str.strip()
+        try:
+            hour_str, minute_str = time_s.split(":")
+            time(int(hour_str), int(minute_str))
+        except Exception:
+            raise ValueError(
+                f'Некорректное время "{time_s}". '
+                f'Используйте формат HH:MM, например "09:30" или "13:20, 15:00"'
+            )
+
+    return v
+
+
 class AppSettings(EnvBaseSettings):
     """Настройки приложения FastAPI."""
 
@@ -319,21 +338,39 @@ class ExtractEduSettings(EnvBaseSettings):
     @classmethod
     def validate_cron_hours(cls, v: str) -> str:
         """Валидация cron_update_times"""
-        if not v:
-            raise ValueError("cron_update_times не может быть пустой строкой")
+        return _validate_cron_update_times(v)
 
-        for time_str in v.split(","):
-            time_s = time_str.strip()
-            try:
-                hour_str, minute_str = time_s.split(":")
-                time(int(hour_str), int(minute_str))
-            except Exception:
-                raise ValueError(
-                    f'Некорректное время "{time_s}". '
-                    f'Используйте формат HH:MM, например "09:30" или "13:20, 15:00"'
-                )
 
-        return v
+class GlossarySettings(EnvBaseSettings):
+    """Настройки синхронизации глоссария аббревиатур."""
+
+    api_url: str = (
+        "https://edu.emias.ru/edu-rest-api/test/glossary/glossary/getelements"
+    )
+    page_limit: int = 500
+    cron_update_times: str
+    request_timeout: int = 30
+    max_retries: int = 5
+    retry_backoff_base_seconds: float = 1.0
+    retry_backoff_max_seconds: float = 30.0
+    abbreviation_delimiter: str = ";"
+    term_delimiter: str = ";"
+
+    model_config = SettingsConfigDict(env_prefix="glossary_")
+
+    @field_validator("page_limit")
+    @classmethod
+    def validate_page_limit(cls, value: int) -> int:
+        """Проверяет допустимый размер страницы для внешнего API."""
+        if value < 1 or value > 500:
+            raise ValueError("page_limit должен быть в диапазоне от 1 до 500")
+        return value
+
+    @field_validator("cron_update_times")
+    @classmethod
+    def validate_cron_hours(cls, value: str) -> str:
+        """Валидирует расписание запуска синхронизации глоссария."""
+        return _validate_cron_update_times(value)
 
 
 class ShortSettings(EnvBaseSettings):
@@ -423,6 +460,7 @@ class Settings(EnvBaseSettings):
     slowapi: SlowAPISettings = SlowAPISettings()
     search_metrics: SearchMetricsEnabled = SearchMetricsEnabled()
     extract_edu: ExtractEduSettings = ExtractEduSettings()
+    glossary: GlossarySettings = GlossarySettings()
     postgres: PostgresSettings = PostgresSettings()
     short_settings: ShortSettings = ShortSettings()
 

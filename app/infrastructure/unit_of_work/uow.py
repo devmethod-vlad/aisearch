@@ -1,4 +1,5 @@
 from app.common.uow.base_uow import BaseUnitOfWork
+from app.domain.repositories.glossary import GlossaryRepository
 from app.domain.repositories.knowledge_feedback import KnowledgeFeedbackRepository
 from app.domain.repositories.search_feedback import SearchFeedbackRepository
 from app.domain.repositories.search_request import SearchRequestRepository
@@ -14,3 +15,4 @@ class UnitOfWork(BaseUnitOfWork, IUnitOfWork):
         self.search_request = SearchRequestRepository(session=self.session)
         self.search_feedback = SearchFeedbackRepository(session=self.session)
         self.knowledge_feedback = KnowledgeFeedbackRepository(session=self.session)
+        self.glossary = GlossaryRepository(session=self.session)
