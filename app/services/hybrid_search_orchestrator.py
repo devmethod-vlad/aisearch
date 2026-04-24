@@ -110,10 +110,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         Ключевые этапы: чтение pack из Redis, нормализация query/filters,
         presearch, dense+lex поиск, merge/rerank, кеширование и запись ответа.
-        Token-фильтры применяются синхронно во всех ветках поиска:
+        Token-фильтры применяются только в основном dense/lex pipeline:
         - векторный поиск (Milvus `filter_expr`);
-        - lexical/presearch поиск (OpenSearch `bool.filter`);
-        - cache key (детерминированная часть по фильтрам).
+        - lexical поиск (OpenSearch `bool.filter`);
+        - cache key итогового ответа (детерминированная часть по фильтрам).
+
+        Presearch — отдельный exact-match этап по `presearch_field`, который
+        выполняется без token-фильтрации.
         """
         start_total = time.perf_counter()
         metrics: dict[str, float] = {}
@@ -225,13 +228,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 presearch_enabled = bool(settings_local.presearch_enabled)
                 presearch_field = settings_local.presearch_field
-                presearch_key = (
-                    f"{int(presearch_enabled)}:{presearch_field}:"
-                    f"{hash_query(raw_query)}:{filter_cache_key}"
+                presearch_key_part = (
+                    f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
                 )
+                filters_key_part = filter_cache_key
                 cache_key = (
                     f"hyb:{query_hash}:{top_k}:{settings_local.version}:"
-                    f"{presearch_key}"
+                    f"{presearch_key_part}:{filters_key_part}"
                 )
                 cached = await self.redis.get(cache_key) if self.use_cache else None
 
@@ -252,7 +255,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             query=raw_query,
                             field_name=presearch_field,
                             use_ce=switches_local.use_reranker,
-                            token_filters=token_filters,
                         )
                         metrics["presearch_time"] = self._metrics_logger(
                             "🕒 Presearch (exact match)", presearch_start
@@ -554,13 +556,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         field_name: str,
         *,
         use_ce: bool,
-        token_filters: NormalizedTokenFilters,
     ) -> dict[str, tp.Any] | None:
         """Ищет один точный (без учета регистра) результат по заданному полю OpenSearch.
 
         Используется в `documents_search` перед основным dense/lex этапом.
-        Важно, что сюда прокидываются те же token-фильтры, что и в основной
-        поиск, иначе presearch мог бы вернуть документ из неверного среза.
+        Этот шаг намеренно НЕ использует token-фильтры role/product: presearch
+        должен находить exact-match документ независимо от фильтров основного поиска.
 
         Важный момент: в разных схемах индекса `term + case_insensitive` может
         срабатывать только на части полей, поэтому используем двухэтапный подход:
@@ -573,7 +574,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         output_fields = os_adapter.config.output_fields
 
         query_folded = query.casefold()
-        filter_clauses = build_opensearch_token_filter_clauses(token_filters)
 
         # 1) Наиболее надежный путь: script query по doc-values (обычно keyword).
         # Не зависит от поддержки `case_insensitive` в term-query для конкретной версии OS.
@@ -610,7 +610,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "bool": {
                     "minimum_should_match": 1,
                     "should": script_should,
-                    "filter": filter_clauses,
                 }
             }
         }
@@ -639,7 +638,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "bool": {
                     "minimum_should_match": 1,
                     "should": should_terms,
-                    "filter": filter_clauses,
                 }
             }
         }
@@ -656,8 +654,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         fallback_body = {
             "query": {
                 "bool": {
-                    "must": {"match_phrase": {field_name: {"query": query}}},
-                    "filter": filter_clauses,
+                    "must": {"match_phrase": {field_name: {"query": query}}}
                 }
             }
         }
