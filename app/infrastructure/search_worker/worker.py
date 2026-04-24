@@ -19,7 +19,6 @@ from dishka import AsyncContainer, make_async_container
 
 from app.common.logger import LoggerType
 from app.common.storages.sync_redis import SyncRedisStorage
-from app.infrastructure.adapters.interfaces import IVLLMAdapter
 from app.infrastructure.utils.nlp import init_nltk_resources
 from app.infrastructure.utils.process import (
     update_process_info,
@@ -34,7 +33,6 @@ from app.settings.config import (
     PostgresSettings,
     RedisSettings,
     Settings,
-    VLLMSettings,
     settings,
 )
 from app.settings.logging_config import setup_logging
@@ -81,7 +79,6 @@ worker.conf.update(
     task_queues={"gpu-search": {"exchange": "gpu-search", "routing_key": "gpu-search"}},
     task_routes={
         "search_task": {"queue": "gpu-search"},
-        "generate-answer-vllm": {"queue": "gpu-search"},
     },
     result_expires=600,
 )
@@ -114,7 +111,6 @@ def init_container_and_model() -> AsyncContainer:
             HybridSearchSettings: settings.hybrid,
             LLMGlobalSemaphoreSettings: settings.llm_global_sem,
             LLMQueueSettings: settings.llm_queue,
-            VLLMSettings: settings.vllm,
         },
     )
 
@@ -201,13 +197,6 @@ def on_worker_process_shutdown(**kwargs: dict[str, tp.Any]) -> None:
 
     async def _shutdown_container_and_clients() -> None:
         if container:
-            try:
-                vllm_client = await container.get(IVLLMAdapter)
-                await vllm_client.close()
-            except Exception as e:
-                logger = logging.getLogger("celery")
-                logger.warning(f"Ошибка при закрытии VLLM-клиента: {e!r}")
-
             try:
                 await container.close()
             except Exception as e:

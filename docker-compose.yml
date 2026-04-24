@@ -220,31 +220,3 @@ services:
 #        condition: service_started
 #        restart: true
 
-#  aisearch-vllm:
-#    image: vllm/vllm-openai:latest
-#    container_name: aisearch-vllm
-#    ports:
-#      - 8000:8000
-#    volumes:
-#      - ${APP_MODELSTORE_HOST_PATH}/:${APP_MODELSTORE_CONTR_PATH}/
-#    env_file:
-#      - .env
-#    environment:
-#      - NVIDIA_VISIBLE_DEVICES=all
-#      - HF_HUB_OFFLINE=1
-#    deploy:
-#      resources:
-#        reservations:
-#          devices:
-#            - capabilities: [ gpu ]
-#              driver: nvidia
-#              count: all
-#    shm_size: 16g
-#    command: >
-#      --model ${APP_MODELSTORE_CONTR_PATH}/${VLLM_MODEL_NAME}
-#      --quantization awq
-#      --served-model-name ${VLLM_MODEL_SERVED_NAME}
-#      --max-model-len ${VLLM_MAX_INPUT_TOKENS}
-#      --gpu-memory-utilization ${VLLM_GPU_MEMORY_UTILIZATION}
-#      --trust-remote-code
-#      --port ${VLLM_PORT}

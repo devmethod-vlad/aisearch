@@ -112,9 +112,6 @@ services:
       aisearch-opensearch:
         condition: service_healthy
 
-#  aisearch-vllm:
-#    networks:
-#      - default
 
 networks:
   default:

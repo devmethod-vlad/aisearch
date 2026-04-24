@@ -23,7 +23,6 @@ from app.settings.config import (
     ShortSettings,
     SlowAPISettings,
     TokenFiltersSettings,
-    VLLMSettings,
     WarmupSettings,
 )
 
@@ -36,7 +35,6 @@ def test_settings(
     test_database_settings: PostgresSettings,
     test_redis_settings: RedisSettings,
     test_celery_settings: CelerySettings,
-    test_vllm_settings: VLLMSettings,
     test_hybrid_settings: HybridSearchSettings,
     test_llm_queue_settings: LLMQueueSettings,
     test_llm_global_sem_settings: LLMGlobalSemaphoreSettings,
@@ -57,7 +55,6 @@ def test_settings(
         database=test_database_settings,
         redis=test_redis_settings,
         celery=test_celery_settings,
-        vllm=test_vllm_settings,
         hybrid=test_hybrid_settings,
         llm_queue=test_llm_queue_settings,
         llm_global_sem=test_llm_global_sem_settings,
@@ -208,23 +205,6 @@ def test_celery_settings() -> CelerySettings:
     )
 
 
-@pytest.fixture(scope="session")
-def test_vllm_settings() -> VLLMSettings:
-    """Настройки VLLM для тестов"""
-    return VLLMSettings(
-        base_url="http://localhost",
-        port=8000,
-        api_key=None,
-        model=None,
-        model_name="test-model",
-        max_input_tokens=4096,
-        max_output_tokens=512,
-        temperature=0.7,
-        top_p=0.9,
-        request_timeout=60,
-        stream=False,
-    )
-
 
 @pytest.fixture(scope="session")
 def test_hybrid_settings() -> HybridSearchSettings:
@@ -315,7 +295,6 @@ def test_slowapi_settings() -> SlowAPISettings:
     """Настройки лимитов для тестов"""
     return SlowAPISettings(
         search="100/minute",
-        generate="10/minute",
     )
 
 

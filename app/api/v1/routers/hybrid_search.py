@@ -36,23 +36,6 @@ async def get_documents(
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 
 
-# @router.post("/generate", response_model=TaskResponse)
-# @limiter.limit(settings.slowapi.generate, key_func=get_remote_address)
-# @inject
-# async def generate_answer(
-#     request: Request,
-#     query: str,
-#     top_k: int = 5,
-#     system_prompt: str | None = None,
-#     service: FromDishka[IHybridSearchService] = None,
-# ) -> JSONResponse:
-#     """Генерирует ответ. Ставит задачу в очередь и возвращает ticket_id."""
-#     response = await service.enqueue_generate(
-#         query=query, top_k=top_k, system_prompt=system_prompt
-#     )
-#     return JSONResponse(
-#         content=jsonable_encoder(response, exclude_none=True), status_code=202
-#     )
 
 
 @router.get("/info/{ticket_id}", response_model=TaskResponse)

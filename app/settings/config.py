@@ -1,7 +1,6 @@
 import typing as tp
 from collections.abc import Sequence
 from datetime import time
-from pathlib import Path
 
 from pydantic import (
     PostgresDsn,
@@ -103,22 +102,6 @@ class RedisSettings(EnvBaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="redis_")
 
-
-class VLLMSettings(EnvBaseSettings):
-    """Настройки клиента LLM"""
-
-    base_url: str
-    port: int
-    api_key: str | None = None
-    model: str | None = None
-    model_name: str
-    max_input_tokens: int = 4096
-    max_output_tokens: int = 512
-    temperature: float = 0.7
-    top_p: float = 0.9
-    request_timeout: int = 60
-    stream: bool = False
-    model_config = SettingsConfigDict(env_prefix="vllm_")
 
 
 class HybridSearchSettings(EnvBaseSettings):
@@ -275,7 +258,6 @@ class SlowAPISettings(EnvBaseSettings):
     """Настройки slowapi лимитов"""
 
     search: str
-    generate: str
 
     model_config = SettingsConfigDict(env_prefix="slowapi_limit_")
 
@@ -442,7 +424,6 @@ class Settings(EnvBaseSettings):
     milvus: MilvusSettings = MilvusSettings()
     redis: RedisSettings = RedisSettings()
     celery: CelerySettings = CelerySettings()
-    vllm: VLLMSettings = VLLMSettings()
     hybrid: HybridSearchSettings = HybridSearchSettings()
     token_filters: TokenFiltersSettings = TokenFiltersSettings()
     llm_queue: LLMQueueSettings = LLMQueueSettings()
@@ -456,15 +437,6 @@ class Settings(EnvBaseSettings):
     extract_edu: ExtractEduSettings = ExtractEduSettings()
     postgres: PostgresSettings = PostgresSettings()
     short_settings: ShortSettings = ShortSettings()
-
-    @model_validator(mode="after")
-    def _fill_vllm_model(self) -> tp.Self:
-        if not (getattr(self.vllm, "model", None)):
-            base = getattr(self.app, "modelstore_contr_path", None)
-            name = getattr(self.vllm, "model_name", None)
-            if base and name:
-                self.vllm.model = str(Path(base) / name)
-        return self
 
 
 settings = Settings()
