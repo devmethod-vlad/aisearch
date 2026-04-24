@@ -1,6 +1,6 @@
 import json
 import uuid
-from types import SimpleNamespace
+from types import SimpleNamespace, TracebackType
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,15 +14,20 @@ from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 
 class _AsyncCtx:
-    async def __aenter__(self):
+    async def __aenter__(self) -> "_AsyncCtx":
         return self
 
-    async def __aexit__(self, exc_type, exc, tb):
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool:
         return False
 
 
 class _Sem:
-    def acquire(self):
+    def acquire(self) -> _AsyncCtx:
         return _AsyncCtx()
 
 
@@ -47,12 +52,16 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     orchestrator.sem = _Sem()
     orchestrator.uow = _Uow()
     orchestrator.redis = AsyncMock()
-    orchestrator.logger = SimpleNamespace(info=lambda *_: None, debug=lambda *_: None, warning=lambda *_: None)
+    orchestrator.logger = SimpleNamespace(
+        info=lambda *_: None, debug=lambda *_: None, warning=lambda *_: None
+    )
     orchestrator._metrics_logger = lambda *_args, **_kwargs: 0.0
     orchestrator.model = SimpleNamespace(encode=lambda *_args, **_kwargs: [[0.1]])
     orchestrator.model_name = "test-model"
     orchestrator.ce_model_name = "test-ce"
-    orchestrator.ce = SimpleNamespace(rank_fast=lambda _pairs: [0.0], ce_postprocess=lambda scores: scores)
+    orchestrator.ce = SimpleNamespace(
+        rank_fast=lambda _pairs: [0.0], ce_postprocess=lambda scores: scores
+    )
 
     orchestrator.settings = SimpleNamespace(
         presearch_enabled=True,
@@ -112,10 +121,15 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
     pack_key = "pack"
     result_key = "result"
 
-    async def _redis_get(key: str):
+    async def _redis_get(key: str) -> str:
         if key == pack_key:
             return json.dumps(
-                {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"]}
+                {
+                    "query": "KB-12345",
+                    "top_k": 3,
+                    "role": ["Врач"],
+                    "product": ["ЭМИАС"],
+                }
             )
         return "[]"
 
@@ -125,10 +139,15 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
     await orchestrator.documents_search("task-1", "ticket-1", pack_key, result_key)
     first_cache_key = orchestrator.redis.get.await_args_list[1].args[0]
 
-    async def _redis_get_second(key: str):
+    async def _redis_get_second(key: str) -> str:
         if key == pack_key:
             return json.dumps(
-                {"query": "KB-12345", "top_k": 3, "role": ["Админ"], "product": ["ЭМИАС"]}
+                {
+                    "query": "KB-12345",
+                    "top_k": 3,
+                    "role": ["Админ"],
+                    "product": ["ЭМИАС"],
+                }
             )
         return "[]"
 
@@ -161,7 +180,9 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
     )
     expected_expr = build_milvus_token_filter_expr(expected_filters)
 
-    assert orchestrator.vector_db.search.await_args.kwargs["filter_expr"] == expected_expr
+    assert (
+        orchestrator.vector_db.search.await_args.kwargs["filter_expr"] == expected_expr
+    )
 
 
 @pytest.mark.asyncio

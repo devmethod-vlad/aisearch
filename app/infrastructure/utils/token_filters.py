@@ -215,7 +215,10 @@ def build_opensearch_token_filter_clauses(
     clauses: list[dict[str, tp.Any]] = []
     for token_field in sorted(filters.by_token_field):
         # Внутри поля разрешаем совпадение по любому из выбранных токенов.
-        should = [{"term": {token_field: token}} for token in filters.by_token_field[token_field]]
+        should = [
+            {"term": {token_field: token}}
+            for token in filters.by_token_field[token_field]
+        ]
         clauses.append({"bool": {"should": should, "minimum_should_match": 1}})
     return clauses
 
