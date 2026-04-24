@@ -5,6 +5,8 @@ import typing as tp
 import numpy as np
 import torch
 
+from app.domain.schemas.glossary import GlossaryElementCreateDTO
+
 
 class IRedisSemaphore(abc.ABC):
     """Глобальный семафор на редисе"""
@@ -165,3 +167,11 @@ class IEduAdapter(abc.ABC):
     @abc.abstractmethod
     async def provoke_harvest_to_edu(self, harvest_type: str) -> bool:
         """Обновление файлов на edu"""
+
+
+class IGlossaryAdapter(abc.ABC):
+    """Адаптер внешнего API глоссария."""
+
+    @abc.abstractmethod
+    async def fetch_all(self) -> list[GlossaryElementCreateDTO]:
+        """Получает все элементы глоссария из внешнего API постранично."""

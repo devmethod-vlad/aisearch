@@ -2,6 +2,7 @@ import abc
 
 from app.common.uow.interfaces import BaseAbstractUnitOfWork
 from app.domain.repositories.interfaces import (
+    IGlossaryRepository,
     IKnowledgeFeedbackRepository,
     ISearchFeedbackRepository,
     ISearchRequestRepository,
@@ -14,3 +15,4 @@ class IUnitOfWork(BaseAbstractUnitOfWork, abc.ABC):
     search_request: ISearchRequestRepository
     search_feedback: ISearchFeedbackRepository
     knowledge_feedback: IKnowledgeFeedbackRepository
+    glossary: IGlossaryRepository

@@ -90,6 +90,14 @@ class IUpdaterService(abc.ABC):
         """Обновление всех источников"""
 
 
+class IGlossaryService(abc.ABC):
+    """Сервис синхронизации глоссария."""
+
+    @abc.abstractmethod
+    async def sync_glossary(self) -> int:
+        """Получает глоссарий из внешнего API и полностью заменяет данные в БД."""
+
+
 class IFeedbackService(ABC):
     """Интерфейс сервиса обратной связи"""
 

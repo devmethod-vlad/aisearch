@@ -198,6 +198,17 @@
     EXTRACT_VIO_HARVESTER_SUFFIX="/vio/runtime_harvest"
     EXTRACT_KB_HARVESTER_SUFFIX="/knowledge-base/collect-all"
 
+    # === Glossary sync ===
+    GLOSSARY_API_URL="https://edu.emias.ru/edu-rest-api/test/glossary/glossary/getelements"
+    GLOSSARY_PAGE_LIMIT=500
+    GLOSSARY_CRON_UPDATE_TIMES="03:30"
+    GLOSSARY_REQUEST_TIMEOUT=30
+    GLOSSARY_MAX_RETRIES=5
+    GLOSSARY_RETRY_BACKOFF_BASE_SECONDS=1
+    GLOSSARY_RETRY_BACKOFF_MAX_SECONDS=30
+    GLOSSARY_ABBREVIATION_DELIMITER=";"
+    GLOSSARY_TERM_DELIMITER=";"
+
     # === PosgreSQL ===
     POSTGRES_USER=postgres
     POSTGRES_PASSWORD=111
