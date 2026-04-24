@@ -28,27 +28,6 @@ class IRedisSemaphore(abc.ABC):
         """Асинхронный контекстный менеджер для захвата семафора"""
 
 
-class IVLLMAdapter(abc.ABC):
-    """Адаптер для LLM"""
-
-    @abc.abstractmethod
-    async def chat_completion(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        *,
-        max_tokens: int | None = None,
-        temperature: float | None = None,
-        top_p: float | None = None,
-        extra: dict[str, tp.Any] | None = None,
-    ) -> str:
-        """Метод запроса к LLM"""
-
-    @abc.abstractmethod
-    async def close(self) -> None:
-        """Закрытие подключения"""
-
-
 class IOpenSearchAdapter(abc.ABC):
     """Интерфейс для работы с OpenSearch"""
 

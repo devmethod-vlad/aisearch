@@ -22,7 +22,6 @@ from app.settings.config import (
     PostgresSettings,
     RedisSettings,
     Settings,
-    VLLMSettings,
     settings,
 )
 from app.settings.logging_config import setup_logging
@@ -72,7 +71,6 @@ async def main() -> None:
             HybridSearchSettings: settings.hybrid,
             LLMGlobalSemaphoreSettings: settings.llm_global_sem,
             LLMQueueSettings: settings.llm_queue,
-            VLLMSettings: settings.vllm,
         },
     )
     logger = await container.get(AISearchLogger)

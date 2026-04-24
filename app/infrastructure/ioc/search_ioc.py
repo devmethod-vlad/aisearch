@@ -11,10 +11,8 @@ from app.infrastructure.adapters.interfaces import (
     IEduAdapter,
     IOpenSearchAdapter,
     IRedisSemaphore,
-    IVLLMAdapter,
 )
 from app.infrastructure.adapters.light_interfaces import ILLMQueue
-from app.infrastructure.adapters.llm_adapter import VLLMAdapter
 from app.infrastructure.adapters.open_search import OpenSearchAdapter
 from app.infrastructure.adapters.queue import LLMQueue
 from app.infrastructure.adapters.semaphore import RedisSemaphore
@@ -50,7 +48,6 @@ class ApplicationProvider(Provider):
     )
     redis_semaphore = provide(RedisSemaphore, scope=Scope.APP, provides=IRedisSemaphore)
     queue = provide(LLMQueue, scope=Scope.APP, provides=ILLMQueue)
-    vllm_client = provide(VLLMAdapter, scope=Scope.APP, provides=IVLLMAdapter)
     os_adapter = provide(
         OpenSearchAdapter, scope=Scope.APP, provides=IOpenSearchAdapter
     )

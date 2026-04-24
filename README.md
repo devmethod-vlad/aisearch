@@ -85,7 +85,7 @@
     MILVUS_MODEL_NAME=USER-bge-m3
     MILVUS_SCHEMA_PATH=app/settings/conf.json
 
-    # === Очередь LLM (для отложенной генерации, если нет слота семафора) ===
+    # === Очередь фоновых поисковых задач (legacy-имя LLM_QUEUE_* для совместимости) ===
     LLM_QUEUE_LIST_KEY=llm:queue:list
     LLM_QUEUE_TICKET_HASH_PREFIX=llm:ticket:
     LLM_QUEUE_MAX_SIZE=10
@@ -122,7 +122,6 @@
     # === SlowAPI ===
 
     SLOWAPI_LIMIT_SEARCH=5/minute
-    SLOWAPI_LIMIT_GENERATE=5/minute
 
 
     # === OpenSearch ===
@@ -161,7 +160,7 @@
     CELERY_WORKERS_NUM=2
     CELERY_GRACE_PERIOD_SECONDS=15
 
-    # === Глобальный семафор (общий лимит конкаренси для поиска и генерации) ===
+    # === Глобальный семафор поисковых задач (legacy-имя LLM_GLOBAL_SEM_* для совместимости) ===
     LLM_GLOBAL_SEM_REDIS_DSN="redis://${REDIS_HOSTNAME}:${REDIS_PORT}/${REDIS_DATABASE}"
     LLM_GLOBAL_SEM_KEY=llm:{global}:sem
     LLM_GLOBAL_SEM_LIMIT=2
@@ -178,21 +177,6 @@
     RERANKER_SOFTMAX_TEMP=0.7
     RERANKER_MODEL_NAME=cross-encoder-russian-msmarco
     RERANKER_PAIRS_FIELDS=question,analysis,answer
-
-    # === vLLM (локальный OpenAI-совместимый сервер) ===
-    VLLM_BASE_URL=http://aisearch-vllm:8000/v1
-    VLLM_PORT=8003
-    VLLM_API_KEY=local-dev
-    VLLM_MODEL_SERVED_NAME=mistral-nemo-awq
-    VLLM_MAX_INPUT_TOKENS=4096
-    VLLM_MAX_OUTPUT_TOKENS=512
-    VLLM_TEMPERATURE=0.7
-    VLLM_TOP_P=0.9
-    VLLM_REQUEST_TIMEOUT=60
-    VLLM_STREAM=false
-    VLLM_MODEL_NAME=Llama-3.2-1B-Instruct-NEO-SI-FI-GGUF/Llama-3.2-1B-Instruct-NEO-SI-FI-Q4_K_M-imat.gguf
-    VLLM_GPU_MEMORY_UTILIZATION=0.6
-
     # === Прогрев эмбеддера/реранкера при старте ===
     WARMUP_ENABLED=true
     WARMUP_CE_PAIRS="Как оформить доступ в систему?||Как оформить доступ врача в систему?;Запись к врачу||Как записаться к врачу"

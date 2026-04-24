@@ -118,15 +118,6 @@ async def _queue_drain_loop() -> None:
                     queue="gpu-search",
                     task_id=ticket_id,
                 )
-
-            elif task_type == "generate":
-                logger.info("🚩 НАЧАЛО ВЫПОЛНЕНИЯ ЗАДАЧИ типа 'generate'")
-                celery_client.send_task(
-                    "generate-answer-vllm",
-                    args=(ticket_id, payload["pack_key"], payload["result_key"]),
-                    queue="gpu-search",
-                    task_id=ticket_id,
-                )
             else:
                 logger.info(f"⚠️ Неизвестный тип задачи: {task_type}")
                 await queue.set_failed(ticket_id, f"unknown task type: {task_type}")
