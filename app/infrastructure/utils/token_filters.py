@@ -205,8 +205,12 @@ def build_opensearch_token_filter_clauses(
     - AND между разными token-полями (каждая группа — отдельный element в
       `bool.filter`).
 
-    Используется в `_os_candidates` и `_presearch_exact_match`, чтобы
-    presearch и основной lexical-поиск применяли одинаковые фильтры.
+    Используется в `_os_candidates` для основного lexical-поиска.
+    `_presearch_exact_match` намеренно не использует эти clauses: presearch
+    остаётся unfiltered exact-match этапом по `presearch_field`, а
+    token-фильтры применяются только в основном dense/lex pipeline.
+    При этом cache key всё равно учитывает token-фильтры, чтобы не
+    смешивать результаты запросов с разными фильтрами.
     """
     clauses: list[dict[str, tp.Any]] = []
     for token_field in sorted(filters.by_token_field):

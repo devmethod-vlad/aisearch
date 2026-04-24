@@ -5,7 +5,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from app.infrastructure.utils.token_filters import MultiValueTokenConfig
+from app.infrastructure.utils.token_filters import (
+    MultiValueTokenConfig,
+    build_milvus_token_filter_expr,
+    normalize_request_token_filters,
+)
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 
@@ -151,10 +155,13 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
 
     await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
 
-    assert orchestrator.vector_db.search.await_args.kwargs["filter_expr"] == (
-        'array_contains_any(role_tokens, ["врач"]) and '
-        'array_contains_any(product_tokens, ["эмиас"])'
+    expected_filters = normalize_request_token_filters(
+        {"role": ["Врач"], "product": ["ЭМИАС"]},
+        config=orchestrator.token_filter_config,
     )
+    expected_expr = build_milvus_token_filter_expr(expected_filters)
+
+    assert orchestrator.vector_db.search.await_args.kwargs["filter_expr"] == expected_expr
 
 
 @pytest.mark.asyncio
