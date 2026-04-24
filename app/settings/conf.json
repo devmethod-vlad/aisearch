@@ -144,6 +144,13 @@
       "nullable": true
     },
     {
+      "name": "answer_copy",
+      "dtype": "VARCHAR",
+      "description": "Answer text for clipboard copy",
+      "max_length": 65535,
+      "nullable": true
+    },
+    {
       "name": "for_user",
       "dtype": "VARCHAR",
       "description": "For user flag",

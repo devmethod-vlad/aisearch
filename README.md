@@ -79,7 +79,7 @@
     MILVUS_VECTOR_FIELD=embedding
     MILVUS_ID_FIELD=pk
     MILVUS_SEARCH_FIELDS=question
-    MILVUS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
+    MILVUS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
     MILVUS_VOLUME_HOST_PATH=./volumes/milvus
     MILVUS_VOLUME_CONTR_PATH=/var/lib/milvus
     MILVUS_MODEL_NAME=USER-bge-m3
@@ -110,8 +110,8 @@
     HYBRID_PRESEARCH_FIELD=ext_id
     HYBRID_COLLECTION_NAME=kb_default
     HYBRID_MERGE_BY_FIELD=ext_id
-    HYBRID_MERGE_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
-    HYBRID_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
+    HYBRID_MERGE_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
+    HYBRID_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
     HYBRID_DENSE_ABS_MIN=0.25
     HYBRID_DENSE_REL_MIN=0.6
     HYBRID_LEX_REL_MIN=0.5
@@ -133,7 +133,7 @@
     OS_USER=
     OS_PASSWORD=
     OS_SEARCH_FIELDS=question,analysis,answer
-    OS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,jira
+    OS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
     OS_OPERATOR=or
     OS_MIN_SHOULD_MATCH=1
     OS_FUZZINESS=0

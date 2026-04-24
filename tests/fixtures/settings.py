@@ -131,7 +131,7 @@ def test_milvus_settings(
         id_field="ext_id",
         metric_type="IP",
         search_fields="question",
-        output_fields="row_idx,source,ext_id,page_id,role,component,question,analysis,answer",
+        output_fields="row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy",
     )
 
 
@@ -154,7 +154,7 @@ def test_opensearch_settings(
         search_fields="question,analysis,answer,source,role",
         output_fields=(
             "row_idx,source,ext_id,page_id,role,component,product,actual,second_line,"
-            "question,question_md,analysis,analysis_md,answer,answer_md,for_user,jira,modified_at"
+            "question,question_md,analysis,analysis_md,answer,answer_md,answer_copy,for_user,jira,modified_at"
         ),
         operator="or",
         min_should_match=1,
@@ -208,7 +208,6 @@ def test_celery_settings() -> CelerySettings:
     )
 
 
-
 @pytest.fixture(scope="session")
 def test_hybrid_settings() -> HybridSearchSettings:
     """Настройки гибридного поиска для тестов"""
@@ -227,7 +226,7 @@ def test_hybrid_settings() -> HybridSearchSettings:
         version="v1",
         collection_name="kb_default",
         merge_by_field="ext_id",
-        merge_fields="row_idx,source,ext_id,page_id,role,component,question,analysis,answer",
+        merge_fields="row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy",
         enable_intermediate_results=False,
         intermediate_results_top_k=10,
     )

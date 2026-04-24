@@ -84,7 +84,7 @@ class MilvusSettings(EnvBaseSettings):
     metric_type: str = "IP"
     search_fields: str = "question"
     output_fields: str | list[str] = (
-        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
 
     @model_validator(mode="after")
@@ -122,7 +122,6 @@ class RedisSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="redis_")
 
 
-
 class HybridSearchSettings(EnvBaseSettings):
     """Настройки глобального поиска"""
 
@@ -143,7 +142,7 @@ class HybridSearchSettings(EnvBaseSettings):
     collection_name: str = "kb_default"
     merge_by_field: str = "ext_id"
     merge_fields: str | list[str] = (
-        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
     enable_intermediate_results: bool
     intermediate_results_top_k: int
@@ -171,9 +170,7 @@ class TokenFiltersSettings(EnvBaseSettings):
 
     @field_validator("raw_fields", mode="before")
     @classmethod
-    def parse_raw_fields(
-        cls, v: tp.Any, info: ValidationInfo
-    ) -> tuple[str, ...]:
+    def parse_raw_fields(cls, v: tp.Any, info: ValidationInfo) -> tuple[str, ...]:
         separator = info.data.get("env_separator", ",")
 
         if isinstance(v, str):
@@ -235,7 +232,7 @@ class OpenSearchSettings(EnvBaseSettings):
     password: str | None = None
     search_fields: str | list[str] = "question,analysis,answer"
     output_fields: str | list[str] = (
-        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer"
+        "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
     operator: str = "or"
     min_should_match: int = 1
