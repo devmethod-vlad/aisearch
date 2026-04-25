@@ -247,24 +247,42 @@ class EduAdapter(IEduAdapter):
             return file_data
 
     async def _get_attachment_versions(
-        self,
-        client: httpx.AsyncClient,
-        attachment_id: str,
+            self,
+            client: httpx.AsyncClient,
+            attachment_id: str,
     ) -> list[dict[str, tp.Any]]:
-        """Получает все версии attachment с поддержкой пагинации."""
+        """Получает все версии attachment с поддержкой пагинации.
+
+        Если Confluence Data Center не возвращает историю версий attachment по
+        endpoint `/rest/api/content/{attachment_id}/version`, метод логирует
+        предупреждение и возвращает пустой список. Это позволяет не считать
+        успешную загрузку файла ошибочной только из-за недоступной очистки версий.
+        """
         versions: list[dict[str, tp.Any]] = []
         start = 0
         limit = 100
 
         while True:
             url = f"{self.edu_url}/rest/api/content/{attachment_id}/version"
-            response = await self._request_with_retries(
-                client,
-                method="GET",
-                url=url,
-                headers=self._confluence_headers,
-                params={"start": start, "limit": limit},
-            )
+
+            try:
+                response = await self._request_with_retries(
+                    client,
+                    method="GET",
+                    url=url,
+                    headers=self._confluence_headers,
+                    params={"start": start, "limit": limit},
+                )
+            except httpx.HTTPStatusError as error:
+                if error.response.status_code == 404:
+                    self.logger.warning(
+                        "Confluence не вернул историю версий attachment "
+                        f"{attachment_id}: endpoint {url} ответил 404. "
+                        "Очистка старых версий будет пропущена."
+                    )
+                    return []
+                raise
+
             data = response.json()
             batch = data.get("results", [])
             versions.extend(batch)
@@ -356,18 +374,22 @@ class EduAdapter(IEduAdapter):
         return response.json()
 
     async def upload_or_update_attachment_to_edu(
-        self,
-        filename: str,
-        content: bytes,
-        content_type: str,
-        keep_last_versions: int,
-        page_id: str | None = None,
+            self,
+            filename: str,
+            content: bytes,
+            content_type: str,
+            keep_last_versions: int,
+            page_id: str | None = None,
     ) -> None:
         """Загружает новый attachment или новую версию существующего файла.
 
         Если attachment с таким filename уже есть на странице, создается новая
         версия файла. После успешной загрузки старые версии удаляются так, чтобы
         осталось не больше keep_last_versions последних версий.
+
+        Очистка старых версий выполняется best-effort: если Confluence не отдает
+        историю версий или удаление старых версий недоступно, сам факт успешной
+        загрузки файла не считается ошибкой.
         """
         page_id = page_id or self.page_id
         files = {"file": (filename, content, content_type)}
@@ -378,6 +400,8 @@ class EduAdapter(IEduAdapter):
                 filename=filename,
                 page_id=page_id,
             )
+
+            should_prune_versions = False
 
             if existing_attachment:
                 attachment_id = existing_attachment["id"]
@@ -392,11 +416,15 @@ class EduAdapter(IEduAdapter):
                     headers=self._confluence_headers,
                     files=files,
                 )
+                should_prune_versions = True
+
                 self.logger.info(
                     f"Создана новая версия attachment '{filename}' (id={attachment_id})"
                 )
             else:
-                upload_url = f"{self.edu_url}/rest/api/content/{page_id}/child/attachment"
+                upload_url = (
+                    f"{self.edu_url}/rest/api/content/{page_id}/child/attachment"
+                )
                 response = await self._request_with_retries(
                     client,
                     method="POST",
@@ -406,13 +434,23 @@ class EduAdapter(IEduAdapter):
                 )
                 payload = response.json()
                 attachment_id = payload["results"][0]["id"]
-                self.logger.info(f"Создан новый attachment '{filename}' (id={attachment_id})")
 
-            await self._prune_attachment_versions(
-                client=client,
-                attachment_id=attachment_id,
-                keep_last_versions=keep_last_versions,
-            )
+                self.logger.info(
+                    f"Создан новый attachment '{filename}' (id={attachment_id})"
+                )
+
+            if should_prune_versions:
+                try:
+                    await self._prune_attachment_versions(
+                        client=client,
+                        attachment_id=attachment_id,
+                        keep_last_versions=keep_last_versions,
+                    )
+                except Exception:
+                    self.logger.exception(
+                        "Файл успешно загружен, но не удалось очистить старые "
+                        f"версии attachment '{filename}' (id={attachment_id})"
+                    )
 
     async def download_vio_base_file(self) -> io.BytesIO:
         """Скачать файл базы ВИО с EDU"""

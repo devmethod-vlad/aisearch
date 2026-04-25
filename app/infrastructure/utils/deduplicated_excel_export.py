@@ -67,17 +67,29 @@ def _apply_excel_formatting(
     source_df: pd.DataFrame,
     worksheet: Worksheet,
 ) -> None:
-    """Применяет базовое форматирование листа Excel для читаемости."""
+    """Применяет базовое форматирование листа Excel для читаемости.
+
+    Функция используется при формировании Excel-отчета с дедуплицированными
+    знаниями. Она фиксирует строку заголовков, включает автофильтр и подбирает
+    ширину колонок по максимальной длине заголовка или значения.
+
+    Значения `pd.NA`, `NaN` и `None` приводятся к пустой строке, чтобы расчет
+    длины ячейки не падал на пропущенных данных.
+    """
     worksheet.freeze_panes = "A2"
 
     if not source_df.empty:
         worksheet.auto_filter.ref = worksheet.dimensions
 
     for index, column_name in enumerate(source_df.columns, start=1):
-        column_values = source_df[column_name].astype("string")
-        max_cell_length = column_values.map(len).max() if not column_values.empty else 0
+        column_values = source_df[column_name].fillna("").astype(str)
+        max_cell_length = (
+            column_values.map(len).max() if not column_values.empty else 0
+        )
+
         header_length = len(str(column_name))
-        width = min(max(header_length, max_cell_length) + 2, 80)
+        width = min(max(header_length, int(max_cell_length)) + 2, 80)
+
         column_letter = worksheet.cell(row=1, column=index).column_letter
         worksheet.column_dimensions[column_letter].width = width
 

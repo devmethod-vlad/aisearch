@@ -10,6 +10,42 @@ from app.infrastructure.utils.deduplicated_excel_export import (
     build_source_statistics,
 )
 
+def test_build_deduplicated_knowledge_excel_handles_missing_values() -> None:
+    field_mapping = {
+        "Источник": "source",
+        "ID": "ext_id",
+        "Вопрос (clean)": "question",
+        "Ответ (clean)": "answer",
+    }
+
+    df = pd.DataFrame(
+        [
+            {
+                "source": "ТП",
+                "ext_id": "1",
+                "question": "Вопрос 1",
+                "answer": pd.NA,
+            },
+            {
+                "source": "ВиО",
+                "ext_id": "2",
+                "question": None,
+                "answer": "Ответ 2",
+            },
+        ]
+    )
+
+    excel_bytes = build_deduplicated_knowledge_excel(
+        df=df,
+        field_mapping=field_mapping,
+    )
+
+    assert isinstance(excel_bytes, bytes)
+    assert len(excel_bytes) > 0
+
+    excel_file = pd.ExcelFile(BytesIO(excel_bytes))
+    assert set(excel_file.sheet_names) == {"Знания", "Статистика"}
+
 
 def test_build_export_dataframe_renames_and_keeps_order() -> None:
     field_mapping = {
