@@ -6,6 +6,10 @@ from sentence_transformers import SentenceTransformer
 from app.common.logger import AISearchLogger
 from app.infrastructure.adapters.interfaces import IEduAdapter, IOpenSearchAdapter
 from app.infrastructure.storages.interfaces import IVectorDatabase
+from app.infrastructure.utils.deduplicated_excel_export import (
+    build_deduplicated_knowledge_excel,
+    build_export_file_name,
+)
 from app.infrastructure.utils.prepare_dataframe import (
     combine_validated_sources,
     dedup_by_question_any,
@@ -282,6 +286,55 @@ class UpdaterService(IUpdaterService):
 
         cleanup_resources(self.logger)
 
+    async def _export_deduplicated_knowledge_if_enabled(
+        self,
+        df: pd.DataFrame,
+    ) -> None:
+        """Экспортирует дедуплицированные знания в Excel и загружает их в Confluence.
+
+        Метод вызывается только из `update_all` после `dedup_by_question_any`.
+        Если флаг `settings.extract_edu.deduplicated_excel_upload_enabled` выключен,
+        метод ничего не делает.
+
+        Любая ошибка формирования Excel или загрузки attachment должна логироваться
+        вызывающим кодом и не должна прерывать основной процесс обновления Milvus/OpenSearch.
+        """
+        if not self.settings.extract_edu.deduplicated_excel_upload_enabled:
+            self.logger.info(
+                "Экспорт дедуплицированного Excel выключен: "
+                "EXTRACT_DEDUPLICATED_EXCEL_UPLOAD_ENABLED=false"
+            )
+            return
+
+        self.logger.info(
+            "Экспорт дедуплицированных знаний включен. "
+            f"Строк после дедупликации: {len(df)}"
+        )
+        self.logger.info("Начало формирования Excel-файла с дедуплицированными знаниями")
+
+        file_name = build_export_file_name(
+            template=self.settings.extract_edu.deduplicated_excel_file_name_template
+        )
+        self.logger.info(f"Имя файла для выгрузки: {file_name}")
+
+        excel_bytes = build_deduplicated_knowledge_excel(
+            df=df,
+            field_mapping=self.field_mapping,
+        )
+        self.logger.info(f"Excel-файл сформирован, размер: {len(excel_bytes)} байт")
+
+        self.logger.info("Начинаем загрузку Excel-вложения в Confluence")
+        await self.edu.upload_or_update_attachment_to_edu(
+            filename=file_name,
+            content=excel_bytes,
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            keep_last_versions=self.settings.extract_edu.deduplicated_excel_keep_versions,
+        )
+
+        self.logger.info("Экспорт и загрузка Excel с дедуплицированными знаниями завершены")
+
     async def update_all(self) -> None:
         df_kb = await self._load_excel_from_edu("kb")
         df_vio = await self._load_excel_from_edu("vio")
@@ -307,6 +360,13 @@ class UpdaterService(IUpdaterService):
             [df_kb_validated, df_vio_validated], id_column=self.id_column
         )
         combined_df = dedup_by_question_any(combined_df)
+
+        try:
+            await self._export_deduplicated_knowledge_if_enabled(combined_df)
+        except Exception:
+            self.logger.exception(
+                "❌ Ошибка формирования или загрузки Excel-файла с дедуплицированными знаниями"
+            )
 
         tp_df, vio_df = split_by_source(combined_df)
 

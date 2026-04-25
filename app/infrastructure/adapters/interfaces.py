@@ -168,6 +168,32 @@ class IEduAdapter(abc.ABC):
     async def provoke_harvest_to_edu(self, harvest_type: str) -> bool:
         """Обновление файлов на edu"""
 
+    @abc.abstractmethod
+    async def upload_attachment_to_edu(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        page_id: str | None = None,
+    ) -> dict:
+        """Загружает файл как attachment на страницу EDU/Confluence."""
+
+    @abc.abstractmethod
+    async def upload_or_update_attachment_to_edu(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        keep_last_versions: int,
+        page_id: str | None = None,
+    ) -> None:
+        """Загружает новый attachment или новую версию существующего файла.
+
+        Если attachment с таким filename уже есть на странице, создается новая
+        версия файла. После успешной загрузки старые версии удаляются так, чтобы
+        осталось не больше keep_last_versions последних версий.
+        """
+
 
 class IGlossaryAdapter(abc.ABC):
     """Адаптер внешнего API глоссария."""

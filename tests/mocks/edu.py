@@ -43,6 +43,28 @@ class MockEduAdapter(IEduAdapter):
         """Скачать файл базы знаний с EDU"""
         return io.BytesIO(self._kb_file_path.read_bytes())
 
+
+    async def upload_attachment_to_edu(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        page_id: str | None = None,
+    ) -> dict:
+        """Не используется в текущих unit-тестах."""
+        return {"filename": filename, "size": len(content), "content_type": content_type}
+
+    async def upload_or_update_attachment_to_edu(
+        self,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        keep_last_versions: int,
+        page_id: str | None = None,
+    ) -> None:
+        """Не используется в текущих unit-тестах."""
+        return None
+
     async def provoke_harvest_to_edu(self, harvest_type: str = "all") -> bool:
         """Не используется в UpdaterService"""
         return True

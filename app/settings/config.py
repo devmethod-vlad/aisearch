@@ -326,6 +326,13 @@ class ExtractEduSettings(EnvBaseSettings):
     vio_harvester_suffix: str
     kb_harvester_suffix: str
 
+    deduplicated_excel_upload_enabled: bool = False
+    deduplicated_excel_file_name_template: str = "statistic_{timestamp}.xlsx"
+    deduplicated_excel_keep_versions: int = 5
+    deduplicated_excel_max_retries: int = 5
+    deduplicated_excel_retry_backoff_base_seconds: float = 1.0
+    deduplicated_excel_retry_backoff_max_seconds: float = 30.0
+
     logs_path: str | None = None
     log_level: str = "INFO"
 
@@ -336,6 +343,33 @@ class ExtractEduSettings(EnvBaseSettings):
     def validate_cron_hours(cls, v: str) -> str:
         """Валидация cron_update_times"""
         return _validate_cron_update_times(v)
+
+    @field_validator("deduplicated_excel_keep_versions")
+    @classmethod
+    def validate_deduplicated_excel_keep_versions(cls, value: int) -> int:
+        """Проверяет, что ограничение числа версий attachment >= 1."""
+        if value < 1:
+            raise ValueError("deduplicated_excel_keep_versions должен быть >= 1")
+        return value
+
+    @field_validator("deduplicated_excel_max_retries")
+    @classmethod
+    def validate_deduplicated_excel_max_retries(cls, value: int) -> int:
+        """Проверяет, что число попыток запросов >= 1."""
+        if value < 1:
+            raise ValueError("deduplicated_excel_max_retries должен быть >= 1")
+        return value
+
+    @field_validator(
+        "deduplicated_excel_retry_backoff_base_seconds",
+        "deduplicated_excel_retry_backoff_max_seconds",
+    )
+    @classmethod
+    def validate_deduplicated_excel_backoff_values(cls, value: float) -> float:
+        """Проверяет, что значения backoff не отрицательные."""
+        if value < 0:
+            raise ValueError("значения backoff не могут быть отрицательными")
+        return value
 
 
 class GlossarySettings(EnvBaseSettings):
