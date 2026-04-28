@@ -74,15 +74,19 @@ elif [ "$overall_status" != "ok" ]; then
     exit 1
 fi
 
-REQUIRED_CONTAINERS=(
-    aisearch-celery-search-worker
-    aisearch-queue-worker
-)
+if [ -z "${REQUIRED_CONTAINERS:-}" ]; then
+    log "💀 ERROR: REQUIRED_CONTAINERS is not set"
+    log "🚨 EMERGENCY: Terminating container"
+    kill -TERM 1
+    exit 1
+fi
+
+read -r -a REQUIRED_CONTAINERS_LIST <<< "$REQUIRED_CONTAINERS"
 
 CONTAINER_FAILURES=0
 MISSING_CONTAINERS=()
 
-for container in "${REQUIRED_CONTAINERS[@]}"; do
+for container in "${REQUIRED_CONTAINERS_LIST[@]}"; do
     if ! getent hosts "$container" > /dev/null 2>&1; then
         log "❌ FAIL: $container is NOT reachable"
         ((CONTAINER_FAILURES++))
