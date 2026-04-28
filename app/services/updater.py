@@ -9,6 +9,7 @@ from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.utils.deduplicated_excel_export import (
     build_deduplicated_knowledge_excel,
     build_export_file_name,
+    build_filter_comparison_statistics,
 )
 from app.infrastructure.utils.prepare_dataframe import (
     combine_validated_sources,
@@ -289,10 +290,13 @@ class UpdaterService(IUpdaterService):
     async def _export_deduplicated_knowledge_if_enabled(
         self,
         df: pd.DataFrame,
+        *,
+        statistics_df: pd.DataFrame | None = None,
     ) -> None:
         """Экспортирует дедуплицированные знания в Excel и загружает их в Confluence.
 
-        Метод вызывается только из `update_all` после `dedup_by_question_any`.
+        Метод вызывается только из `update_all` после `prepare_dataframe` и
+        обновления обеих source-частей через `_update_collection_from_df`.
         Если флаг `settings.extract_edu.deduplicated_excel_upload_enabled` выключен,
         метод ничего не делает.
 
@@ -320,6 +324,8 @@ class UpdaterService(IUpdaterService):
         excel_bytes = build_deduplicated_knowledge_excel(
             df=df,
             field_mapping=self.field_mapping,
+            statistics_df=statistics_df,
+            excluded_columns={"row_idx", *self.token_filter_config.token_fields},
         )
         self.logger.info(f"Excel-файл сформирован, размер: {len(excel_bytes)} байт")
 
@@ -359,29 +365,61 @@ class UpdaterService(IUpdaterService):
         combined_df = combine_validated_sources(
             [df_kb_validated, df_vio_validated], id_column=self.id_column
         )
-        combined_df = dedup_by_question_any(combined_df)
+        before_filter_df = combined_df.copy()
+
+        combined_deduplicated_df = dedup_by_question_any(combined_df)
+        tp_df, vio_df = split_by_source(combined_deduplicated_df)
+
+        prepared_frames: list[pd.DataFrame] = []
+
+        if tp_df is not None and not tp_df.empty:
+            _, _, tp_df_prepared = prepare_dataframe(
+                tp_df,
+                id_column=self.id_column,
+                token_config=self.token_filter_config,
+            )
+        else:
+            tp_df_prepared = pd.DataFrame(columns=combined_deduplicated_df.columns)
+
+        await self._update_collection_from_df(tp_df_prepared, target_source="ТП")
+        if not tp_df_prepared.empty:
+            prepared_frames.append(tp_df_prepared)
+
+        if vio_df is not None and not vio_df.empty:
+            _, _, vio_df_prepared = prepare_dataframe(
+                vio_df,
+                id_column=self.id_column,
+                token_config=self.token_filter_config,
+            )
+        else:
+            vio_df_prepared = pd.DataFrame(columns=combined_deduplicated_df.columns)
+
+        await self._update_collection_from_df(vio_df_prepared, target_source="ВиО")
+        if not vio_df_prepared.empty:
+            prepared_frames.append(vio_df_prepared)
+
+        if prepared_frames:
+            prepared_combined_df = pd.concat(prepared_frames, ignore_index=True)
+        else:
+            prepared_combined_df = pd.DataFrame(columns=combined_deduplicated_df.columns)
+
+        statistics_df = build_filter_comparison_statistics(
+            before_df=before_filter_df,
+            after_df=prepared_combined_df,
+            source_column="source",
+            id_column=self.id_column,
+            before_count_column="Всего (до фильтрации)",
+            after_count_column="Всего (после фильтрации)",
+        )
 
         try:
-            await self._export_deduplicated_knowledge_if_enabled(combined_df)
+            await self._export_deduplicated_knowledge_if_enabled(
+                prepared_combined_df,
+                statistics_df=statistics_df,
+            )
         except Exception:
             self.logger.exception(
                 "❌ Ошибка формирования или загрузки Excel-файла с дедуплицированными знаниями"
             )
-
-        tp_df, vio_df = split_by_source(combined_df)
-
-        _, _, df_prepared = prepare_dataframe(
-            tp_df,
-            id_column=self.id_column,
-            token_config=self.token_filter_config,
-        )
-        await self._update_collection_from_df(df_prepared, target_source="ТП")
-
-        _, _, df_prepared = prepare_dataframe(
-            vio_df,
-            id_column=self.id_column,
-            token_config=self.token_filter_config,
-        )
-        await self._update_collection_from_df(df_prepared, target_source="ВиО")
 
         cleanup_resources(self.logger)
