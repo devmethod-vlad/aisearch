@@ -8,6 +8,8 @@ from openpyxl.worksheet.worksheet import Worksheet
 def build_export_dataframe(
     df: pd.DataFrame,
     field_mapping: dict[str, str],
+    *,
+    excluded_columns: set[str] | None = None,
 ) -> pd.DataFrame:
     """Готовит датафрейм для вкладки "Знания".
 
@@ -22,6 +24,10 @@ def build_export_dataframe(
     reversed_mapping = {internal_name: russian_name for russian_name, internal_name in field_mapping.items()}
 
     renamed_df = df.rename(columns=reversed_mapping).copy()
+    if excluded_columns:
+        renamed_df = renamed_df.drop(
+            columns=[column for column in excluded_columns if column in renamed_df.columns]
+        )
 
     mapped_columns_order = [column_name for column_name in field_mapping if column_name in renamed_df.columns]
     extra_columns = [column_name for column_name in renamed_df.columns if column_name not in mapped_columns_order]
@@ -31,7 +37,11 @@ def build_export_dataframe(
 
 
 def build_source_statistics(
-    export_df: pd.DataFrame,
+    df: pd.DataFrame,
+    *,
+    source_column: str = "Источник",
+    id_column: str = "ID",
+    count_column: str = "Количество уникальных ID",
 ) -> pd.DataFrame:
     """Строит статистику уникальных знаний по источникам.
 
@@ -44,10 +54,7 @@ def build_source_statistics(
     - "Источник"
     - "Количество уникальных ID"
     """
-    source_column = "Источник"
-    id_column = "ID"
-
-    missing_columns = [column for column in (source_column, id_column) if column not in export_df.columns]
+    missing_columns = [column for column in (source_column, id_column) if column not in df.columns]
     if missing_columns:
         raise ValueError(
             "Для формирования статистики отсутствуют колонки: "
@@ -55,12 +62,43 @@ def build_source_statistics(
         )
 
     stats_df = (
-        export_df.groupby(source_column, dropna=False)[id_column]
+        df.groupby(source_column, dropna=False)[id_column]
         .nunique(dropna=True)
-        .reset_index(name="Количество уникальных ID")
+        .reset_index(name=count_column)
     )
+    if source_column != "Источник":
+        stats_df = stats_df.rename(columns={source_column: "Источник"})
 
     return stats_df
+
+
+def build_filter_comparison_statistics(
+    before_df: pd.DataFrame,
+    after_df: pd.DataFrame,
+    *,
+    source_column: str = "source",
+    id_column: str = "ext_id",
+    before_count_column: str = "Всего (до фильтрации)",
+    after_count_column: str = "Всего (после фильтрации)",
+) -> pd.DataFrame:
+    before_stats = build_source_statistics(
+        before_df,
+        source_column=source_column,
+        id_column=id_column,
+        count_column=before_count_column,
+    )
+    after_stats = build_source_statistics(
+        after_df,
+        source_column=source_column,
+        id_column=id_column,
+        count_column=after_count_column,
+    )
+
+    merged_df = before_stats.merge(after_stats, on="Источник", how="outer")
+    merged_df[[before_count_column, after_count_column]] = (
+        merged_df[[before_count_column, after_count_column]].fillna(0).astype(int)
+    )
+    return merged_df[["Источник", before_count_column, after_count_column]]
 
 
 def _apply_excel_formatting(
@@ -97,6 +135,9 @@ def _apply_excel_formatting(
 def build_deduplicated_knowledge_excel(
     df: pd.DataFrame,
     field_mapping: dict[str, str],
+    *,
+    statistics_df: pd.DataFrame | None = None,
+    excluded_columns: set[str] | None = None,
 ) -> bytes:
     """Формирует Excel-файл с дедуплицированными знаниями.
 
@@ -110,20 +151,26 @@ def build_deduplicated_knowledge_excel(
     Возвращает содержимое `.xlsx` файла в виде bytes, чтобы файл можно было
     загрузить в Confluence без сохранения на диск.
     """
-    knowledge_df = build_export_dataframe(df=df, field_mapping=field_mapping)
-    statistics_df = build_source_statistics(knowledge_df)
+    knowledge_df = build_export_dataframe(
+        df=df,
+        field_mapping=field_mapping,
+        excluded_columns=excluded_columns,
+    )
+    final_statistics_df = (
+        statistics_df if statistics_df is not None else build_source_statistics(knowledge_df)
+    )
 
     buffer = io.BytesIO()
 
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
         knowledge_df.to_excel(writer, index=False, sheet_name="Знания")
-        statistics_df.to_excel(writer, index=False, sheet_name="Статистика")
+        final_statistics_df.to_excel(writer, index=False, sheet_name="Статистика")
 
         knowledge_ws = writer.sheets["Знания"]
         stats_ws = writer.sheets["Статистика"]
 
         _apply_excel_formatting(knowledge_df, knowledge_ws)
-        _apply_excel_formatting(statistics_df, stats_ws)
+        _apply_excel_formatting(final_statistics_df, stats_ws)
 
     return buffer.getvalue()
 
