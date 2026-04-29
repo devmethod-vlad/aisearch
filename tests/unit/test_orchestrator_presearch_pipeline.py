@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import app.services.hybrid_search_orchestrator as orchestrator_module
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
     build_milvus_token_filter_expr,
@@ -90,6 +91,7 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     orchestrator.short = SimpleNamespace(mode=False)
     orchestrator.normalize_query = False
     orchestrator.use_cache = use_cache
+    orchestrator.os_index_name = "kb_index"
     orchestrator.enabled_intermediate_results = False
     orchestrator.response_metrics_enabled = False
     orchestrator.log_metrics_enabled = False
@@ -101,6 +103,7 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     orchestrator.morph = None
 
     orchestrator.os_adapter = SimpleNamespace(
+        os_schema=SimpleNamespace(index_name="kb_index"),
         config=SimpleNamespace(
             output_fields=["ext_id", "question"],
             search_fields=["question"],
@@ -117,6 +120,9 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
 @pytest.mark.asyncio
 async def test_documents_search_cache_key_depends_on_filters() -> None:
     orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator_module.get_or_create_search_data_version = AsyncMock(
+        return_value="dv-1"
+    )
 
     pack_key = "pack"
     result_key = "result"
@@ -156,6 +162,8 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
     second_cache_key = orchestrator.redis.get.await_args_list[1].args[0]
 
     assert first_cache_key != second_cache_key
+    assert ":1:ext_id:" in first_cache_key
+    assert "role_tokens=" in first_cache_key
 
 
 @pytest.mark.asyncio
@@ -217,3 +225,41 @@ async def test_documents_search_injects_presearch_result_even_with_filters() -> 
 
     assert payload["results"][0]["ext_id"] == "KB-12345"
     assert payload["results"][0]["_source"] == "presearch"
+
+
+@pytest.mark.asyncio
+async def test_documents_search_cache_key_depends_on_data_version() -> None:
+    orchestrator = _build_orchestrator(use_cache=True)
+    pack_payload = json.dumps({"query": "KB-12345", "top_k": 3})
+    orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None, pack_payload, None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+    orchestrator_module.get_or_create_search_data_version = AsyncMock(
+        side_effect=["dv-1", "dv-2"]
+    )
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+    key_v1 = orchestrator.redis.get.await_args_list[1].args[0]
+    await orchestrator.documents_search("task-2", "ticket-2", "pack", "result")
+    key_v2 = orchestrator.redis.get.await_args_list[3].args[0]
+
+    assert key_v1 != key_v2
+    assert ":dv-1:" in key_v1
+    assert ":dv-2:" in key_v2
+
+
+@pytest.mark.asyncio
+async def test_documents_search_cache_hit_uses_current_data_version() -> None:
+    orchestrator = _build_orchestrator(use_cache=True)
+    cached_payload = json.dumps([{"ext_id": "cached"}], ensure_ascii=False)
+    orchestrator.redis.get = AsyncMock(
+        side_effect=[json.dumps({"query": "KB-1", "top_k": 1}), cached_payload]
+    )
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+    orchestrator_module.get_or_create_search_data_version = AsyncMock(
+        return_value="dv-current"
+    )
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+    cache_key = orchestrator.redis.get.await_args_list[1].args[0]
+
+    assert ":dv-current:" in cache_key

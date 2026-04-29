@@ -28,6 +28,10 @@ from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
 from app.infrastructure.utils.metrics import _convert_to_ms_or_return_0, _now_ms
 from app.infrastructure.utils.nlp import hash_query, normalize_query
+from app.infrastructure.utils.search_cache_version import (
+    build_search_cache_key,
+    get_or_create_search_data_version,
+)
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
     NormalizedTokenFilters,
@@ -79,6 +83,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.ce_model_name = self.ce_settings.model_name.split("/")[-1]
         self.use_cache = settings.app.use_cache
         self.normalize_query = settings.app.normalize_query
+        self.os_index_name = settings.opensearch.index_name
         self.enabled_intermediate_results = settings.hybrid.enable_intermediate_results
         self.intermediate_results_top_k = settings.hybrid.intermediate_results_top_k
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
@@ -232,10 +237,24 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
                 )
                 filters_key_part = filter_cache_key
-                cache_key = (
-                    f"hyb:{query_hash}:{top_k}:{settings_local.version}:"
-                    f"{presearch_key_part}:{filters_key_part}"
-                )
+                data_version = None
+                cache_key = ""
+                if self.use_cache:
+                    data_version = await get_or_create_search_data_version(
+                        self.redis,
+                        collection_name=settings_local.collection_name,
+                        index_name=self.os_index_name,
+                    )
+                    cache_key = build_search_cache_key(
+                        collection_name=settings_local.collection_name,
+                        index_name=self.os_index_name,
+                        data_version=data_version,
+                        hybrid_version=settings_local.version,
+                        query_hash=query_hash,
+                        top_k=top_k,
+                        presearch_key_part=presearch_key_part,
+                        filters_key_part=filters_key_part,
+                    )
                 cached = await self.redis.get(cache_key) if self.use_cache else None
 
                 if cached:

@@ -55,6 +55,7 @@ def _build_settings(upload_enabled: bool) -> SimpleNamespace:
             token_suffix="_tokens",
             raw_separator=";",
         ),
+        opensearch=SimpleNamespace(index_name="kb_index"),
         extract_edu=SimpleNamespace(
             deduplicated_excel_upload_enabled=upload_enabled,
             deduplicated_excel_file_name_template="statistic_{timestamp}.xlsx",
@@ -73,6 +74,7 @@ async def test_export_disabled_does_not_call_upload() -> None:
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     df = pd.DataFrame([{"source": "ТП", "ext_id": "1", "question": "Q"}])
@@ -92,6 +94,7 @@ async def test_export_enabled_calls_upload() -> None:
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     df = pd.DataFrame([{"source": "ТП", "ext_id": "1", "question": "Q"}])
@@ -111,6 +114,7 @@ async def test_export_enabled_accepts_optional_statistics_df() -> None:
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     df = pd.DataFrame([{"source": "ТП", "ext_id": "1", "question": "Q"}])
@@ -135,6 +139,7 @@ async def test_update_all_logs_error_when_export_fails_and_continues(
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     monkeypatch.setattr(updater_module, "rename_dataframe", lambda df, _: df)
@@ -190,6 +195,7 @@ async def test_update_all_calls_export_after_both_updates(
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     events: list[str] = []
@@ -242,6 +248,7 @@ async def test_update_all_passes_combined_prepared_df_to_export(
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     monkeypatch.setattr(updater_module, "rename_dataframe", lambda df, _: df)
@@ -300,6 +307,7 @@ async def test_update_all_passes_filter_comparison_statistics_to_export(
         edu=edu,
         milvus=MagicMock(),
         os=MagicMock(),
+        redis=AsyncMock(),
     )
 
     monkeypatch.setattr(updater_module, "rename_dataframe", lambda df, _: df)
