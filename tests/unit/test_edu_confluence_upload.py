@@ -27,6 +27,19 @@ def _build_settings() -> SimpleNamespace:
     return SimpleNamespace(extract_edu=extract)
 
 
+def _patch_async_client_with_transport(
+    monkeypatch: pytest.MonkeyPatch,
+    transport: httpx.MockTransport,
+) -> None:
+    original_async_client = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return original_async_client(*args, **kwargs)
+
+    monkeypatch.setattr(edu_module.httpx, "AsyncClient", client_factory)
+
+
 @pytest.mark.asyncio
 async def test_upload_or_update_creates_attachment_when_not_found(
     monkeypatch: pytest.MonkeyPatch,
@@ -56,11 +69,7 @@ async def test_upload_or_update_creates_attachment_when_not_found(
 
     transport = httpx.MockTransport(handler)
 
-    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        kwargs["transport"] = transport
-        return httpx.AsyncClient(*args, **kwargs)
-
-    monkeypatch.setattr(edu_module.httpx, "AsyncClient", client_factory)
+    _patch_async_client_with_transport(monkeypatch, transport)
 
     adapter = EduAdapter(settings=_build_settings(), logger=MagicMock())
 
@@ -125,11 +134,7 @@ async def test_upload_or_update_updates_existing_and_prunes_old_versions(
 
     transport = httpx.MockTransport(handler)
 
-    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        kwargs["transport"] = transport
-        return httpx.AsyncClient(*args, **kwargs)
-
-    monkeypatch.setattr(edu_module.httpx, "AsyncClient", client_factory)
+    _patch_async_client_with_transport(monkeypatch, transport)
 
     adapter = EduAdapter(settings=_build_settings(), logger=MagicMock())
 
