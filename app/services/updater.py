@@ -4,6 +4,7 @@ import pandas as pd
 from sentence_transformers import SentenceTransformer
 
 from app.common.logger import AISearchLogger
+from app.common.storages.interfaces import KeyValueStorageProtocol
 from app.infrastructure.adapters.interfaces import IEduAdapter, IOpenSearchAdapter
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.utils.deduplicated_excel_export import (
@@ -20,6 +21,7 @@ from app.infrastructure.utils.prepare_dataframe import (
     split_by_source,
     validate_dataframe,
 )
+from app.infrastructure.utils.search_cache_version import bump_search_data_version
 from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 from app.infrastructure.utils.universal import cleanup_resources
 from app.services.interfaces import IUpdaterService
@@ -34,13 +36,16 @@ class UpdaterService(IUpdaterService):
         edu: IEduAdapter,
         milvus: IVectorDatabase,
         os: IOpenSearchAdapter,
+        redis: KeyValueStorageProtocol,
     ):
         self.settings = settings
         self.logger = logger
         self.edu = edu
         self.milvus = milvus
         self.os = os
+        self.redis = redis
         self.collection_name = settings.milvus.collection_name
+        self.index_name = settings.opensearch.index_name
         self.model: SentenceTransformer | None = None
         self.field_mapping = load_field_mapping(settings.app.field_mapping_schema_path)
         self.id_column = settings.app.data_unique_id
@@ -64,11 +69,17 @@ class UpdaterService(IUpdaterService):
 
     async def _update_collection_from_df(
         self, df: pd.DataFrame, target_source: str
-    ) -> None:
+    ) -> bool:
+        """Синхронизирует один source-срез с Milvus/OpenSearch.
+
+        :return: ``True``, если хотя бы одна delete/upsert операция была успешно
+            выполнена и реально изменила данные в любой из БД. Иначе ``False``.
+        """
         if df.empty:
-            return
+            return False
         current_source = target_source
         self.logger.info(f"🔄 Обновление данных для источника: {current_source}")
+        has_changes = False
 
         incoming_ids = df[self.id_column].astype(str).tolist()
 
@@ -97,6 +108,8 @@ class UpdaterService(IUpdaterService):
                 self.logger.info(
                     f"✅ OpenSearch: удалено {deleted_count}, ids: {to_delete_os}"
                 )
+                if (deleted_count or 0) > 0:
+                    has_changes = True
             except Exception as e:
                 self.logger.error(f"❌ Ошибка удаления в OpenSearch: {e}")
 
@@ -111,6 +124,8 @@ class UpdaterService(IUpdaterService):
                     self.collection_name, to_delete_milvus
                 )
                 self.logger.info(f"✅ Milvus: удалено ~{deleted_count}")
+                if (deleted_count or 0) > 0:
+                    has_changes = True
             except Exception as e:
                 self.logger.error(f"❌ Ошибка удаления в Milvus: {e}")
 
@@ -192,11 +207,11 @@ class UpdaterService(IUpdaterService):
 
         if not to_upsert_all:
             self.logger.info("✅ Нет новых или изменённых записей для upsert.")
-            return
+            return has_changes
 
         df_to_upsert = df[df[self.id_column].astype(str).isin(to_upsert_all)].copy()
         if df_to_upsert.empty:
-            return
+            return has_changes
 
         if self.model is None:
             self.model = SentenceTransformer(
@@ -231,6 +246,7 @@ class UpdaterService(IUpdaterService):
                 self.logger.info(
                     f"✅ Milvus: upsert выполнен для {len(mil_metadata)} записей"
                 )
+                has_changes = True
             except Exception as e:
                 self.logger.error(f"❌ Milvus upsert failed: {e}")
 
@@ -242,10 +258,12 @@ class UpdaterService(IUpdaterService):
                 self.logger.info(
                     f"✅ OpenSearch: upsert выполнен для {len(os_metadata)} записей"
                 )
+                has_changes = True
             except Exception as e:
                 self.logger.error(f"❌ OpenSearch upsert failed: {e}")
 
         self.logger.info("✅ Обновление коллекции завершено")
+        return has_changes
 
     async def update_vio_base(self) -> None:
         vio_df = await self._load_excel_from_edu("vio")
@@ -263,7 +281,14 @@ class UpdaterService(IUpdaterService):
             token_config=self.token_filter_config,
         )
         # prepare_dataframe централизованно добавляет token-поля перед upsert.
-        await self._update_collection_from_df(df_prepared, target_source="ВиО")
+        changed = await self._update_collection_from_df(df_prepared, target_source="ВиО")
+        if changed:
+            await bump_search_data_version(
+                self.redis,
+                collection_name=self.collection_name,
+                index_name=self.index_name,
+                reason="update_vio_base",
+            )
 
         cleanup_resources(self.logger)
 
@@ -283,7 +308,14 @@ class UpdaterService(IUpdaterService):
             token_config=self.token_filter_config,
         )
         # Те же правила enrichment, что и для ВиО/полной загрузки.
-        await self._update_collection_from_df(df_prepared, target_source="ТП")
+        changed = await self._update_collection_from_df(df_prepared, target_source="ТП")
+        if changed:
+            await bump_search_data_version(
+                self.redis,
+                collection_name=self.collection_name,
+                index_name=self.index_name,
+                reason="update_kb_base",
+            )
 
         cleanup_resources(self.logger)
 
@@ -381,7 +413,7 @@ class UpdaterService(IUpdaterService):
         else:
             tp_df_prepared = pd.DataFrame(columns=combined_deduplicated_df.columns)
 
-        await self._update_collection_from_df(tp_df_prepared, target_source="ТП")
+        changed_tp = await self._update_collection_from_df(tp_df_prepared, target_source="ТП")
         if not tp_df_prepared.empty:
             prepared_frames.append(tp_df_prepared)
 
@@ -394,9 +426,17 @@ class UpdaterService(IUpdaterService):
         else:
             vio_df_prepared = pd.DataFrame(columns=combined_deduplicated_df.columns)
 
-        await self._update_collection_from_df(vio_df_prepared, target_source="ВиО")
+        changed_vio = await self._update_collection_from_df(vio_df_prepared, target_source="ВиО")
         if not vio_df_prepared.empty:
             prepared_frames.append(vio_df_prepared)
+
+        if changed_tp or changed_vio:
+            await bump_search_data_version(
+                self.redis,
+                collection_name=self.collection_name,
+                index_name=self.index_name,
+                reason="update_all",
+            )
 
         if prepared_frames:
             prepared_combined_df = pd.concat(prepared_frames, ignore_index=True)

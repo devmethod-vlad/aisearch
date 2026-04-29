@@ -2,6 +2,7 @@ import asyncio
 import logging
 import typing as tp
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pandas as pd
 import pytest
@@ -155,4 +156,5 @@ def updater_service(
         edu=mock_edu_adapter,
         milvus=milvus_database,
         os=opensearch_adapter,
+        redis=AsyncMock(),
     )

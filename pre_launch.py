@@ -7,9 +7,11 @@ import traceback
 from pathlib import Path
 
 import pandas as pd
+import redis.asyncio as redis
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings
 
+from app.common.storages.redis import RedisStorage
 from app.infrastructure.utils.prepare_dataframe import (
     combine_validated_sources,
     dedup_by_question_any,
@@ -19,6 +21,7 @@ from app.infrastructure.utils.prepare_dataframe import (
     reorder_columns_by_mapping,
     validate_dataframe,
 )
+from app.infrastructure.utils.search_cache_version import bump_search_data_version
 from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 from app.infrastructure.utils.universal import (
     cleanup_resources,
@@ -421,6 +424,23 @@ async def main(
     from app.infrastructure.adapters.open_search import OpenSearchAdapter
     from app.infrastructure.storages.milvus import MilvusDatabase
 
+    async def _bump_search_cache_data_version(reason: str) -> None:
+        """Обновляет версию data-snapshot для namespace search-cache.
+
+        Вызывается только после успешной пересборки данных Milvus/OpenSearch.
+        """
+        redis_client = redis.from_url(str(settings.redis.dsn))
+        redis_storage = RedisStorage(client=redis_client.client())
+        try:
+            await bump_search_data_version(
+                redis_storage,
+                collection_name=settings.hybrid.collection_name,
+                index_name=settings.opensearch.index_name,
+                reason=reason,
+            )
+        finally:
+            await redis_storage.client.aclose()
+
     milvus_db = None
     model = None
     os_adapter = None
@@ -500,6 +520,14 @@ async def main(
         # Загрузка в OpenSearch, если нужно
         if recreate_opensearch:
             await recreate_opensearch_index(os_adapter, metadata, logger)
+
+        if recreate_milvus or recreate_opensearch:
+            await _bump_search_cache_data_version(
+                reason=(
+                    f"pre_launch_recreate(milvus={int(recreate_milvus)},"
+                    f"opensearch={int(recreate_opensearch)})"
+                )
+            )
 
     finally:
         # Проверяем статус баз данных
