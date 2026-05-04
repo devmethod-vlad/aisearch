@@ -66,6 +66,15 @@
       "product": {
         "type": "keyword"
       },
+      "role_tokens": {
+        "type": "keyword"
+      },
+      "product_tokens": {
+        "type": "keyword"
+      },
+      "component_tokens": {
+        "type": "keyword"
+      },
       "space": {
         "type": "keyword"
       },

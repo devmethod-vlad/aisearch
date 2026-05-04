@@ -35,9 +35,11 @@ async def test_enqueue_search_pack_contains_filters() -> None:
         top_k=3,
         role=["Врач"],
         product=["ЭМИАС"],
+        component=["Назначения"],
     )
 
     pack_raw = redis.set.await_args_list[0].args[1]
     pack = json.loads(pack_raw)
     assert pack["role"] == ["Врач"]
     assert pack["product"] == ["ЭМИАС"]
+    assert pack["component"] == ["Назначения"]

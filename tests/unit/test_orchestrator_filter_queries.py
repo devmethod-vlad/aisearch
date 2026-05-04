@@ -21,15 +21,21 @@ async def test_os_candidates_builds_term_filters() -> None:
     orchestrator.os_adapter = os_adapter
 
     filters = normalize_request_token_filters(
-        {"role": ["Врач"]},
+        {"role": ["Врач"], "component": ["Назначения"]},
         config=MultiValueTokenConfig(
-            raw_fields=("role", "product"), token_suffix="_tokens", raw_separator=";"
+            raw_fields=("role", "product", "component"), token_suffix="_tokens", raw_separator=";"
         ),
     )
     await orchestrator._os_candidates("тест", 5, filters)
 
     body = os_adapter.search.await_args.args[0]
     assert body["query"]["bool"]["filter"] == [
+        {
+            "bool": {
+                "should": [{"term": {"component_tokens": "назначения"}}],
+                "minimum_should_match": 1,
+            }
+        },
         {
             "bool": {
                 "should": [{"term": {"role_tokens": "врач"}}],

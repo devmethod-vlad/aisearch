@@ -41,8 +41,13 @@ class IHybridSearchService(abc.ABC):
         top_k: int,
         role: list[str] | None = None,
         product: list[str] | None = None,
+        component: list[str] | None = None,
     ) -> TaskResponse:
-        """постановка задачи поиска по документам в очередь"""
+        """Постановка задачи поиска с token-фильтрами по metadata-полям.
+
+        Поддерживает raw-фильтры `role`, `product`, `component`; дальнейшая
+        нормализация и применение выполняются в worker/orchestrator.
+        """
         pass
 
 
