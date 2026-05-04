@@ -96,7 +96,7 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     orchestrator.response_metrics_enabled = False
     orchestrator.log_metrics_enabled = False
     orchestrator.token_filter_config = MultiValueTokenConfig(
-        raw_fields=("role", "product"), token_suffix="_tokens", raw_separator=";"
+        raw_fields=("role", "product", "component"), token_suffix="_tokens", raw_separator=";"
     )
     orchestrator.dense_metric = "unit"
     orchestrator.reranker_pairs_fields = ["question"]
@@ -135,6 +135,7 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                     "top_k": 3,
                     "role": ["Врач"],
                     "product": ["ЭМИАС"],
+                    "component": ["Назначения"],
                 }
             )
         return "[]"
@@ -153,6 +154,7 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                     "top_k": 3,
                     "role": ["Админ"],
                     "product": ["ЭМИАС"],
+                    "component": ["Назначения"],
                 }
             )
         return "[]"
@@ -164,6 +166,7 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
     assert first_cache_key != second_cache_key
     assert ":1:ext_id:" in first_cache_key
     assert "role_tokens=" in first_cache_key
+    assert "component_tokens=" in first_cache_key
 
 
 @pytest.mark.asyncio
@@ -172,7 +175,7 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"]}
+            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -183,7 +186,7 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
     await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
 
     expected_filters = normalize_request_token_filters(
-        {"role": ["Врач"], "product": ["ЭМИАС"]},
+        {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]},
         config=orchestrator.token_filter_config,
     )
     expected_expr = build_milvus_token_filter_expr(expected_filters)
@@ -199,7 +202,7 @@ async def test_documents_search_injects_presearch_result_even_with_filters() -> 
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"]}
+            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")

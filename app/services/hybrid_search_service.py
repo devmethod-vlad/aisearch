@@ -39,12 +39,13 @@ class HybridSearchService(IHybridSearchService):
         top_k: int,
         role: list[str] | None = None,
         product: list[str] | None = None,
+        component: list[str] | None = None,
     ) -> TaskResponse:
         """Ставит задачу поиска в очередь вместе с входными token-фильтрами.
 
-        Поля `role`/`product` сохраняются в pack и далее читаются worker-ом
-        (`HybridSearchOrchestrator.documents_search`), где уже выполняется
-        нормализация и применение фильтрации в OpenSearch/Milvus.
+        Поля `role`/`product`/`component` сохраняются в pack и далее читаются
+        worker-ом (`HybridSearchOrchestrator.documents_search`), где уже
+        выполняется нормализация и применение фильтрации в OpenSearch/Milvus.
         """
         ticket_id = str(uuid.uuid4())
         pack_key = f"{self.llm_queue_settings.ticket_hash_prefix}{ticket_id}:pack"
@@ -55,6 +56,7 @@ class HybridSearchService(IHybridSearchService):
             "top_k": top_k,
             "role": role,
             "product": product,
+            "component": component,
         }
         await self.redis.set(
             pack_key,

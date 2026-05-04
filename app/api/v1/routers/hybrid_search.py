@@ -32,6 +32,7 @@ async def get_documents(
         top_k=top_k,
         role=body.role,
         product=body.product,
+        component=body.component,
     )
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 

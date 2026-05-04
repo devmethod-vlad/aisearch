@@ -88,6 +88,15 @@
       "nullable": true
     },
     {
+      "name": "component_tokens",
+      "dtype": "ARRAY",
+      "description": "Normalized component tokens for exact filtering",
+      "element_type": "VARCHAR",
+      "max_capacity": 32,
+      "max_length": 255,
+      "nullable": true
+    },
+    {
       "name": "space",
       "dtype": "VARCHAR",
       "description": "Space or environment",

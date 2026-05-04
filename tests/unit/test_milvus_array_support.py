@@ -20,6 +20,13 @@ def test_load_schema_and_indexes_supports_array_varchar(tmp_path) -> None:
                         "max_capacity": 32,
                         "max_length": 255,
                     },
+                    {
+                        "name": "component_tokens",
+                        "dtype": "ARRAY",
+                        "element_type": "VARCHAR",
+                        "max_capacity": 32,
+                        "max_length": 255,
+                    },
                 ]
             }
         ),
@@ -28,8 +35,11 @@ def test_load_schema_and_indexes_supports_array_varchar(tmp_path) -> None:
 
     fields, _, _ = load_schema_and_indexes_from_json(str(schema_path))
     role_field = next(field for field in fields if field.name == "role_tokens")
+    component_field = next(field for field in fields if field.name == "component_tokens")
     assert role_field.dtype == DataType.ARRAY
     assert role_field.element_type == DataType.VARCHAR
+    assert component_field.dtype == DataType.ARRAY
+    assert component_field.element_type == DataType.VARCHAR
 
 
 def test_milvus_coerce_array_value() -> None:

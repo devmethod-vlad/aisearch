@@ -16,6 +16,7 @@ def test_prepare_dataframe_adds_token_fields() -> None:
                 "space": "x",
                 "role": "Врач;Медсестра",
                 "product": "ЭМИАС;ЛИС",
+                "component": "Назначения;Расписания;НАЗНАЧЕНИЯ",
                 "modified_at": "2026-01-01",
             }
         ]
@@ -25,7 +26,7 @@ def test_prepare_dataframe_adds_token_fields() -> None:
         df,
         id_column="ext_id",
         token_config=MultiValueTokenConfig(
-            raw_fields=("role", "product"),
+            raw_fields=("role", "product", "component"),
             token_suffix="_tokens",
             raw_separator=";",
         ),
@@ -33,4 +34,7 @@ def test_prepare_dataframe_adds_token_fields() -> None:
 
     assert prepared.iloc[0]["role_tokens"] == ["врач", "медсестра"]
     assert prepared.iloc[0]["product_tokens"] == ["эмиас", "лис"]
+    assert prepared.iloc[0]["component"] == "Назначения;Расписания;НАЗНАЧЕНИЯ"
+    assert prepared.iloc[0]["component_tokens"] == ["назначения", "расписания"]
     assert metadata[0]["role_tokens"] == ["врач", "медсестра"]
+    assert metadata[0]["component_tokens"] == ["назначения", "расписания"]

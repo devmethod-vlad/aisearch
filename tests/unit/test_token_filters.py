@@ -33,12 +33,13 @@ def test_partial_match_is_not_allowed() -> None:
 
 def test_config_token_field_mapping() -> None:
     config = MultiValueTokenConfig(
-        raw_fields=("role", "product"),
+        raw_fields=("role", "product", "component"),
         token_suffix="_tokens",
         raw_separator=";",
     )
     assert config.token_field("role") == "role_tokens"
     assert config.token_field("product") == "product_tokens"
+    assert config.token_field("component") == "component_tokens"
 
 
 def test_request_filter_normalization_from_arrays() -> None:
@@ -56,19 +57,28 @@ def test_request_filter_normalization_from_arrays() -> None:
 
 def test_filter_builders_and_cache_part() -> None:
     config = MultiValueTokenConfig(
-        raw_fields=("role", "product"),
+        raw_fields=("role", "product", "component"),
         token_suffix="_tokens",
         raw_separator=";",
     )
     filters = normalize_request_token_filters(
-        {"role": ["Врач"], "product": ["ЭМИАС"]},
+        {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]},
         config=config,
     )
 
-    assert filters.cache_key_part() == "product_tokens=эмиас|role_tokens=врач"
+    assert (
+        filters.cache_key_part()
+        == "component_tokens=назначения|product_tokens=эмиас|role_tokens=врач"
+    )
 
     os_clauses = build_opensearch_token_filter_clauses(filters)
     assert os_clauses == [
+        {
+            "bool": {
+                "should": [{"term": {"component_tokens": "назначения"}}],
+                "minimum_should_match": 1,
+            }
+        },
         {
             "bool": {
                 "should": [{"term": {"product_tokens": "эмиас"}}],
@@ -85,9 +95,27 @@ def test_filter_builders_and_cache_part() -> None:
 
     milvus_expr = build_milvus_token_filter_expr(filters)
     assert milvus_expr == (
+        'ARRAY_CONTAINS(component_tokens, "назначения") AND '
         'ARRAY_CONTAINS(product_tokens, "эмиас") AND '
         'ARRAY_CONTAINS(role_tokens, "врач")'
     )
+
+
+def test_component_value_tokenization_and_runtime_normalization() -> None:
+    config = MultiValueTokenConfig(
+        raw_fields=("role", "product", "component"),
+        token_suffix="_tokens",
+        raw_separator=";",
+    )
+    assert tokenize_record_raw_value("Назначения;Расписания;НАЗНАЧЕНИЯ", separator=";") == [
+        "назначения",
+        "расписания",
+    ]
+    filters = normalize_request_token_filters(
+        {"component": [" Назначения ", "РАСПИСАНИЯ", "назначения"]},
+        config=config,
+    )
+    assert filters.by_token_field["component_tokens"] == ("назначения", "расписания")
 
 
 def test_builders_or_inside_and_between_groups() -> None:
