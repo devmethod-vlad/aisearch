@@ -32,6 +32,14 @@ from app.infrastructure.utils.search_cache_version import (
     build_search_cache_key,
     get_or_create_search_data_version,
 )
+from app.infrastructure.utils.exact_filters import (
+    ExactFilterConfig,
+    NormalizedExactFilters,
+    build_milvus_exact_filter_expr,
+    build_opensearch_exact_filter_clauses,
+    combine_milvus_filter_exprs,
+    normalize_request_exact_filters,
+)
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
     NormalizedTokenFilters,
@@ -92,6 +100,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             raw_fields=settings.token_filters.raw_fields,
             token_suffix=settings.token_filters.token_suffix,
             raw_separator=settings.token_filters.raw_separator,
+        )
+
+        self.exact_filter_config = ExactFilterConfig(
+            raw_fields=settings.exact_filters.raw_fields,
+            field_suffix=settings.exact_filters.field_suffix,
         )
 
         self.dense_metric = settings.milvus.metric_type
@@ -158,14 +171,29 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         raw_filters: dict[str, list[str] | None] = {
             raw_field: pack.get(raw_field) for raw_field in self.token_filter_config.raw_fields
         }
-        # Нормализация фильтров в терминах token-полей (role_tokens и т.п.).
+        # Нормализация token-фильтров в терминах token-полей (role_tokens и т.п.).
         token_filters = normalize_request_token_filters(
             raw_filters, config=self.token_filter_config
         )
         self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
-        # Фильтры участвуют в cache key, чтобы кеш не смешивал разные срезы данных.
-        filter_cache_key = token_filters.cache_key_part()
-        milvus_filter_expr = build_milvus_token_filter_expr(token_filters)
+
+        raw_exact_filters = pack.get("exact_filters") or {}
+        exact_filters = normalize_request_exact_filters(
+            raw_exact_filters,
+            config=self.exact_filter_config,
+        )
+        self.logger.debug(f"Normalized exact filters: {exact_filters.by_filter_field}")
+
+        token_filter_cache_key = token_filters.cache_key_part()
+        exact_filter_cache_key = exact_filters.cache_key_part()
+        filter_cache_key = f"tokens:{token_filter_cache_key};exact:{exact_filter_cache_key}"
+
+        milvus_token_filter_expr = build_milvus_token_filter_expr(token_filters)
+        milvus_exact_filter_expr = build_milvus_exact_filter_expr(exact_filters)
+        milvus_filter_expr = combine_milvus_filter_exprs(
+            milvus_token_filter_expr,
+            milvus_exact_filter_expr,
+        )
         # ---- Short settings ----
         if self.short.mode:
             sh_start = time.perf_counter()
@@ -324,6 +352,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                                     query=query,
                                     k=settings_local.lex_top_k,
                                     token_filters=token_filters,
+                                    exact_filters=exact_filters,
                                 )
                             else:
                                 res = []
@@ -516,7 +545,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         с семантикой OR внутри поля и AND между полями.
         """
         os_adapter = self.os_adapter
-        filter_clauses = build_opensearch_token_filter_clauses(token_filters)
+        filter_clauses = [
+            *build_opensearch_token_filter_clauses(token_filters),
+            *build_opensearch_exact_filter_clauses(exact_filters),
+        ]
         body = {
             "query": {
                 "bool": {

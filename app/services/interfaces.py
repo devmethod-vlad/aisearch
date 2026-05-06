@@ -42,6 +42,7 @@ class IHybridSearchService(abc.ABC):
         role: list[str] | None = None,
         product: list[str] | None = None,
         component: list[str] | None = None,
+        exact_filters: dict[str, str | None] | None = None,
     ) -> TaskResponse:
         """Постановка задачи поиска с token-фильтрами по metadata-полям.
 

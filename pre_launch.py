@@ -22,6 +22,7 @@ from app.infrastructure.utils.prepare_dataframe import (
     validate_dataframe,
 )
 from app.infrastructure.utils.search_cache_version import bump_search_data_version
+from app.infrastructure.utils.exact_filters import ExactFilterConfig
 from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 from app.infrastructure.utils.universal import (
     cleanup_resources,
@@ -195,10 +196,15 @@ async def prepare_and_load_data(
                 token_suffix=settings.token_filters.token_suffix,
                 raw_separator=settings.token_filters.raw_separator,
             )
+            exact_filter_config = ExactFilterConfig(
+                raw_fields=settings.exact_filters.raw_fields,
+                field_suffix=settings.exact_filters.field_suffix,
+            )
             documents, metadata, df_final = prepare_dataframe(
                 combined_df,
                 id_column=settings.app.data_unique_id,
                 token_config=token_filter_config,
+                exact_filter_config=exact_filter_config,
             )
             logger.info(
                 f"✅ Данные подготовлены: "

@@ -1,10 +1,12 @@
 import pandas as pd
 
 from app.infrastructure.utils.prepare_dataframe import prepare_dataframe
+from app.infrastructure.utils.exact_filters import ExactFilterConfig
 from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 
 
-def test_prepare_dataframe_adds_token_fields() -> None:
+def test_prepare_dataframe_adds_token_and_exact_fields() -> None:
+    """Проверяет добавление token- и exact-полей без изменения raw-значений."""
     df = pd.DataFrame(
         [
             {
@@ -30,6 +32,10 @@ def test_prepare_dataframe_adds_token_fields() -> None:
             token_suffix="_tokens",
             raw_separator=";",
         ),
+        exact_filter_config=ExactFilterConfig(
+            raw_fields=("source", "actual", "second_line"),
+            field_suffix="_filter",
+        ),
     )
 
     assert prepared.iloc[0]["role_tokens"] == ["врач", "медсестра"]
@@ -38,3 +44,7 @@ def test_prepare_dataframe_adds_token_fields() -> None:
     assert prepared.iloc[0]["component_tokens"] == ["назначения", "расписания"]
     assert metadata[0]["role_tokens"] == ["врач", "медсестра"]
     assert metadata[0]["component_tokens"] == ["назначения", "расписания"]
+
+    assert prepared.iloc[0]["source_filter"] == "тп"
+    assert prepared.iloc[0]["actual_filter"] == "да"
+    assert prepared.iloc[0]["source"] == "ТП"

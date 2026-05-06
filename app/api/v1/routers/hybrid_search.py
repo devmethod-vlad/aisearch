@@ -27,12 +27,19 @@ async def get_documents(
     """Выполняет гибридный поиск. Ставит задачу в очередь и возвращает ticket_id."""
     query = body.query
     top_k = body.top_k
+    exact_filters = {
+        "source": body.source,
+        "actual": body.actual,
+        "second_line": body.second_line,
+    }
+
     response = await service.enqueue_search(
         query=query,
         top_k=top_k,
         role=body.role,
         product=body.product,
         component=body.component,
+        exact_filters=exact_filters,
     )
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 

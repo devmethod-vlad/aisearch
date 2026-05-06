@@ -22,6 +22,7 @@ from app.infrastructure.utils.prepare_dataframe import (
     validate_dataframe,
 )
 from app.infrastructure.utils.search_cache_version import bump_search_data_version
+from app.infrastructure.utils.exact_filters import ExactFilterConfig
 from app.infrastructure.utils.token_filters import MultiValueTokenConfig
 from app.infrastructure.utils.universal import cleanup_resources
 from app.services.interfaces import IUpdaterService
@@ -54,6 +55,10 @@ class UpdaterService(IUpdaterService):
             raw_fields=settings.token_filters.raw_fields,
             token_suffix=settings.token_filters.token_suffix,
             raw_separator=settings.token_filters.raw_separator,
+        )
+        self.exact_filter_config = ExactFilterConfig(
+            raw_fields=settings.exact_filters.raw_fields,
+            field_suffix=settings.exact_filters.field_suffix,
         )
 
     async def _load_excel_from_edu(self, file_type: str) -> pd.DataFrame:
@@ -279,6 +284,7 @@ class UpdaterService(IUpdaterService):
             vio_df_validated,
             id_column=self.id_column,
             token_config=self.token_filter_config,
+            exact_filter_config=self.exact_filter_config,
         )
         # prepare_dataframe централизованно добавляет token-поля перед upsert.
         changed = await self._update_collection_from_df(df_prepared, target_source="ВиО")
@@ -306,6 +312,7 @@ class UpdaterService(IUpdaterService):
             tp_df_validated,
             id_column=self.id_column,
             token_config=self.token_filter_config,
+            exact_filter_config=self.exact_filter_config,
         )
         # Те же правила enrichment, что и для ВиО/полной загрузки.
         changed = await self._update_collection_from_df(df_prepared, target_source="ТП")
@@ -357,7 +364,11 @@ class UpdaterService(IUpdaterService):
             df=df,
             field_mapping=self.field_mapping,
             statistics_df=statistics_df,
-            excluded_columns={"row_idx", *self.token_filter_config.token_fields},
+            excluded_columns={
+                "row_idx",
+                *self.token_filter_config.token_fields,
+                *self.exact_filter_config.filter_fields,
+            },
         )
         self.logger.info(f"Excel-файл сформирован, размер: {len(excel_bytes)} байт")
 

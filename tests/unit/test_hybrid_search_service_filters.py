@@ -10,6 +10,7 @@ from app.settings.config import LLMQueueSettings, Settings
 
 @pytest.mark.asyncio
 async def test_enqueue_search_pack_contains_filters() -> None:
+    """Проверяет, что pack содержит token- и exact-фильтры отдельным словарем."""
     settings = Settings.model_construct(
         llm_queue=LLMQueueSettings.model_construct(
             ticket_hash_prefix="llm:ticket:",
@@ -36,6 +37,7 @@ async def test_enqueue_search_pack_contains_filters() -> None:
         role=["Врач"],
         product=["ЭМИАС"],
         component=["Назначения"],
+        exact_filters={"source": "ТП", "actual": "Да", "second_line": None},
     )
 
     pack_raw = redis.set.await_args_list[0].args[1]
@@ -43,3 +45,5 @@ async def test_enqueue_search_pack_contains_filters() -> None:
     assert pack["role"] == ["Врач"]
     assert pack["product"] == ["ЭМИАС"]
     assert pack["component"] == ["Назначения"]
+
+    assert pack["exact_filters"] == {"source": "ТП", "actual": "Да", "second_line": None}

@@ -40,6 +40,7 @@ class HybridSearchService(IHybridSearchService):
         role: list[str] | None = None,
         product: list[str] | None = None,
         component: list[str] | None = None,
+        exact_filters: dict[str, str | None] | None = None,
     ) -> TaskResponse:
         """Ставит задачу поиска в очередь вместе с входными token-фильтрами.
 
@@ -57,6 +58,7 @@ class HybridSearchService(IHybridSearchService):
             "role": role,
             "product": product,
             "component": component,
+            "exact_filters": exact_filters or {},
         }
         await self.redis.set(
             pack_key,

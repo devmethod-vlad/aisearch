@@ -186,6 +186,29 @@ class TokenFiltersSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="token_filters_")
 
 
+
+
+class ExactFiltersSettings(EnvBaseSettings):
+    """Настройки exact-фильтрации single-value полей."""
+
+    env_separator: str = ","
+    raw_fields: tp.Annotated[tuple[str, ...], NoDecode] = ()
+    field_suffix: str = "_filter"
+
+    @field_validator("raw_fields", mode="before")
+    @classmethod
+    def parse_raw_fields(cls, v: tp.Any, info: ValidationInfo) -> tuple[str, ...]:
+        """Нормализует список полей exact-фильтрации из env/коллекций."""
+        separator = info.data.get("env_separator", ",")
+        if isinstance(v, str):
+            return tuple(item.strip() for item in v.split(separator) if item.strip())
+        if isinstance(v, (list, tuple, set)):
+            return tuple(str(item).strip() for item in v if str(item).strip())
+        raise ValueError("raw_fields должен быть строкой или списком значений")
+
+    model_config = SettingsConfigDict(env_prefix="exact_filters_")
+
+
 class SearchSwitches(EnvBaseSettings):
     """Настройки переключателей поиска"""
 
@@ -482,6 +505,7 @@ class Settings(EnvBaseSettings):
     celery: CelerySettings = CelerySettings()
     hybrid: HybridSearchSettings = HybridSearchSettings()
     token_filters: TokenFiltersSettings = TokenFiltersSettings()
+    exact_filters: ExactFiltersSettings = ExactFiltersSettings()
     llm_queue: LLMQueueSettings = LLMQueueSettings()
     llm_global_sem: LLMGlobalSemaphoreSettings = LLMGlobalSemaphoreSettings()
     opensearch: OpenSearchSettings = OpenSearchSettings()
