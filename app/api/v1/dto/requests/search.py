@@ -14,3 +14,6 @@ class SearchRequest(BaseModel):
     role: list[str] | None = None
     product: list[str] | None = None
     component: list[str] | None = None
+    source: str | None = None
+    actual: str | None = None
+    second_line: str | None = None

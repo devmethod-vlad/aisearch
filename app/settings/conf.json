@@ -179,6 +179,27 @@
       "description": "Last update date",
       "max_length": 65535,
       "nullable": true
+    },
+    {
+      "name": "source_filter",
+      "dtype": "VARCHAR",
+      "description": "Normalized source value for exact filtering",
+      "max_length": 65535,
+      "nullable": true
+    },
+    {
+      "name": "actual_filter",
+      "dtype": "VARCHAR",
+      "description": "Normalized actual value for exact filtering",
+      "max_length": 65535,
+      "nullable": true
+    },
+    {
+      "name": "second_line_filter",
+      "dtype": "VARCHAR",
+      "description": "Normalized second_line value for exact filtering",
+      "max_length": 65535,
+      "nullable": true
     }
   ],
   "indexes": [
@@ -225,6 +246,18 @@
     },
     {
       "field_name": "for_user",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "source_filter",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "actual_filter",
+      "index_type": "INVERTED"
+    },
+    {
+      "field_name": "second_line_filter",
       "index_type": "INVERTED"
     }
   ],

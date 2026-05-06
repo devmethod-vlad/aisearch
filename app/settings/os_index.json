@@ -101,17 +101,44 @@
           }
         }
       },
-
-      "analysis_md": { "type": "text", "analyzer": "ru_mixed" },
-      "analysis":    { "type": "text", "analyzer": "ru_mixed" },
-
-      "answer_md": { "type": "text", "analyzer": "ru_mixed" },
-      "answer":    { "type": "text", "analyzer": "ru_mixed" },
-      "answer_copy": { "type": "text", "analyzer": "ru_mixed" },
-
-      "for_user":  { "type": "keyword" },
-      "jira": { "type": "keyword" },
-      "modified_at": {"type": "keyword"}
+      "analysis_md": {
+        "type": "text",
+        "analyzer": "ru_mixed"
+      },
+      "analysis": {
+        "type": "text",
+        "analyzer": "ru_mixed"
+      },
+      "answer_md": {
+        "type": "text",
+        "analyzer": "ru_mixed"
+      },
+      "answer": {
+        "type": "text",
+        "analyzer": "ru_mixed"
+      },
+      "answer_copy": {
+        "type": "text",
+        "analyzer": "ru_mixed"
+      },
+      "for_user": {
+        "type": "keyword"
+      },
+      "jira": {
+        "type": "keyword"
+      },
+      "modified_at": {
+        "type": "keyword"
+      },
+      "source_filter": {
+        "type": "keyword"
+      },
+      "actual_filter": {
+        "type": "keyword"
+      },
+      "second_line_filter": {
+        "type": "keyword"
+      }
     }
   }
 }

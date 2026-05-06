@@ -3,6 +3,10 @@ from pathlib import Path
 
 import pandas as pd
 
+from app.infrastructure.utils.exact_filters import (
+    ExactFilterConfig,
+    enrich_records_with_exact_filter_fields,
+)
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
     enrich_records_with_token_fields,
@@ -168,6 +172,7 @@ def prepare_dataframe(
     df: pd.DataFrame,
     id_column: str,
     token_config: MultiValueTokenConfig | None = None,
+    exact_filter_config: ExactFilterConfig | None = None,
 ) -> tuple[list[str], list[dict], pd.DataFrame]:
     """Унифицированная очистка и enrichment данных для ingestion-пайплайна.
 
@@ -225,6 +230,14 @@ def prepare_dataframe(
         enriched_records = enrich_records_with_token_fields(
             df_final.to_dict(orient="records"),
             config=token_config,
+        )
+        df_final = pd.DataFrame(enriched_records)
+
+    if exact_filter_config is not None:
+        # Добавляем служебные *_filter поля отдельно от token-фильтрации.
+        enriched_records = enrich_records_with_exact_filter_fields(
+            df_final.to_dict(orient="records"),
+            config=exact_filter_config,
         )
         df_final = pd.DataFrame(enriched_records)
 
