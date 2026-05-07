@@ -41,13 +41,17 @@ class IHybridSearchService(abc.ABC):
         top_k: int,
         array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
+        search_use_cache: bool = True,
+        show_intermediate_results: bool = False,
+        presearch: dict[str, str] | None = None,
     ) -> TaskResponse:
         """Постановка задачи поиска с metadata-фильтрами.
 
-        `array_filters` содержит фильтры по мультизначным полям
-        `role`/`product`/`component` (внешний API-контракт).
-        `exact_filters` содержит фильтры по single-value полям
-        `source`/`actual`/`second_line`.
+        `array_filters` содержит фильтры по мультизначным metadata-полям.
+        `exact_filters` содержит фильтры по single-value metadata-полям.
+        `search_use_cache` разрешает чтение ранее сохранённого кеша.
+        `show_intermediate_results` включает dense/lex/ce intermediate results.
+        `presearch` включает presearch, если передан объект с `field`.
 
         Дальнейшая нормализация и применение выполняются в worker/orchestrator.
         """

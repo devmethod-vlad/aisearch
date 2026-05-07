@@ -48,7 +48,6 @@ class AppSettings(EnvBaseSettings):
     workers_num: int
     access_key: str
     prefix: str = ""
-    use_cache: bool = True
 
     logs_path: str | None = None
     logs_access_path: str | None = None
@@ -137,14 +136,11 @@ class HybridSearchSettings(EnvBaseSettings):
     precut_min_keep: int = 3
     cache_ttl: int = 3600
     version: str = "v1"
-    presearch_enabled: bool = False
-    presearch_field: str = "ext_id"
     collection_name: str = "kb_default"
     merge_by_field: str = "ext_id"
     merge_fields: str | list[str] = (
         "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
-    enable_intermediate_results: bool
     intermediate_results_top_k: int
 
     @model_validator(mode="after")

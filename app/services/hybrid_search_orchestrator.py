@@ -89,10 +89,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.morph = pymorphy3.MorphAnalyzer()
         self.model_name = settings.milvus.model_name.split("/")[-1]
         self.ce_model_name = self.ce_settings.model_name.split("/")[-1]
-        self.use_cache = settings.app.use_cache
         self.normalize_query = settings.app.normalize_query
         self.os_index_name = settings.opensearch.index_name
-        self.enabled_intermediate_results = settings.hybrid.enable_intermediate_results
         self.intermediate_results_top_k = settings.hybrid.intermediate_results_top_k
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
         self.response_metrics_enabled = settings.search_metrics.response_metrics_enabled
@@ -265,29 +263,52 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     "🕒 Semaphore acquire", time.perf_counter()
                 )
 
-                presearch_enabled = bool(settings_local.presearch_enabled)
-                presearch_field = settings_local.presearch_field
-                presearch_key_part = f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
-                filters_key_part = filter_cache_key
-                data_version = None
-                cache_key = ""
-                if self.use_cache:
-                    data_version = await get_or_create_search_data_version(
-                        self.redis,
-                        collection_name=settings_local.collection_name,
-                        index_name=self.os_index_name,
+                search_use_cache = bool(pack.get("search_use_cache", True))
+                show_intermediate_results = bool(pack.get("show_intermediate_results", False))
+                presearch_config = pack.get("presearch") or None
+
+                presearch_field = None
+                presearch_enabled = False
+                if isinstance(presearch_config, dict):
+                    raw_presearch_field = presearch_config.get("field")
+                    if raw_presearch_field is not None:
+                        presearch_field = str(raw_presearch_field).strip()
+                        presearch_enabled = bool(presearch_field)
+
+                if presearch_enabled and presearch_field:
+                    presearch_key_part = f"1:{presearch_field}:{hash_query(raw_query)}"
+                else:
+                    presearch_key_part = "0:no_presearch"
+
+                data_version = await get_or_create_search_data_version(
+                    self.redis,
+                    collection_name=settings_local.collection_name,
+                    index_name=self.os_index_name,
+                )
+                cache_key = build_search_cache_key(
+                    collection_name=settings_local.collection_name,
+                    index_name=self.os_index_name,
+                    data_version=data_version,
+                    hybrid_version=settings_local.version,
+                    query_hash=query_hash,
+                    top_k=top_k,
+                    presearch_key_part=presearch_key_part,
+                    filters_key_part=filter_cache_key,
+                )
+
+                # show_intermediate_results требует свежего исполнения pipeline,
+                # так как intermediate_results не хранятся в legacy result-cache.
+                allow_cache_read = search_use_cache and not show_intermediate_results
+                cached = await self.redis.get(cache_key) if allow_cache_read else None
+
+                if show_intermediate_results:
+                    self.logger.debug(
+                        "Cache read skipped because show_intermediate_results=True requires fresh pipeline execution"
                     )
-                    cache_key = build_search_cache_key(
-                        collection_name=settings_local.collection_name,
-                        index_name=self.os_index_name,
-                        data_version=data_version,
-                        hybrid_version=settings_local.version,
-                        query_hash=query_hash,
-                        top_k=top_k,
-                        presearch_key_part=presearch_key_part,
-                        filters_key_part=filters_key_part,
+                elif not search_use_cache:
+                    self.logger.debug(
+                        "Cache read skipped because request search_use_cache=False"
                     )
-                cached = await self.redis.get(cache_key) if self.use_cache else None
 
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
@@ -300,7 +321,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 else:
                     # ---- Presearch ----
                     presearch_result = None
-                    if presearch_enabled:
+                    if presearch_enabled and presearch_field:
                         presearch_start = time.perf_counter()
                         presearch_result = await self._presearch_exact_match(
                             query=raw_query,
@@ -414,19 +435,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                     results = _results
 
-                    if self.use_cache:
-                        await self.redis.set(
-                            cache_key,
-                            json.dumps(results, ensure_ascii=False),
-                            ttl=settings_local.cache_ttl,
-                        )
+                    await self.redis.set(
+                        cache_key,
+                        json.dumps(results, ensure_ascii=False),
+                        ttl=settings_local.cache_ttl,
+                    )
 
                 metrics["total_search_time"] = self._metrics_logger(
                     "🕒 Total search", start_total
                 )
 
                 payload = {"results": results}
-                if self.enabled_intermediate_results:
+                if show_intermediate_results:
                     intermediate_results: dict[str, list[dict[str, tp.Any]]] = {}
 
                     if dense:
@@ -497,6 +517,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     payload["metrics"] = {
                         "presearch_time": metrics.get("presearch_time"),
                         "presearch_enabled": presearch_enabled,
+                        "search_use_cache": search_use_cache,
+                        "cache_read_allowed": allow_cache_read,
+                        "show_intermediate_results": show_intermediate_results,
+                        "presearch_field": presearch_field or "",
                         "embedding_time": metrics.get("embedding_time"),
                         "vector_search_time": metrics.get("vector_search_time"),
                         "lexical_search_time": metrics.get("lexical_search_time"),

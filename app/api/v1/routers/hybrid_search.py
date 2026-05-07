@@ -41,11 +41,16 @@ async def get_documents(
         else {}
     )
 
+    presearch = body.presearch.model_dump() if body.presearch else None
+
     response = await service.enqueue_search(
         query=query,
         top_k=top_k,
         array_filters=array_filters,
         exact_filters=exact_filters,
+        search_use_cache=body.search_use_cache,
+        show_intermediate_results=body.show_intermediate_results,
+        presearch=presearch,
     )
     return JSONResponse(content=jsonable_encoder(response), status_code=202)
 
