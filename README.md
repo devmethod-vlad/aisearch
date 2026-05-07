@@ -105,6 +105,8 @@
     HYBRID_W_CE=0.6
     HYBRID_W_DENSE=0.25
     HYBRID_W_LEX=0.15
+    HYBRID_FUSION_MODE=weighted_score
+    HYBRID_RRF_K=60
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
     HYBRID_COLLECTION_NAME=kb_default
@@ -357,3 +359,6 @@ python3 pre_launch.py --export-only
 
 ### Runtime-параметры поиска в API
 Параметры `search_use_cache`, `show_intermediate_results` и `presearch.field` теперь управляются только телом запроса `/hybrid-search/search`, а не env-переменными.
+Параметры `HYBRID_W_DENSE` и `HYBRID_W_LEX` используются на стадии retrieval fusion: в `weighted_score` — как веса score, в `rrf` — как веса rank contribution. `HYBRID_W_CE` больше не участвует в итоговой сумме и используется как compatibility-switch запуска reranker (`SEARCH_USE_RERANKER=true` и `HYBRID_W_CE>0`).
+
+Cross-encoder, если включен, всегда выполняет финальную сортировку (`score_final=score_ce`), а `score_fusion` используется как tie-breaker. Если cross-encoder выключен, финальная сортировка идет только по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.

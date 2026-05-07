@@ -11,6 +11,7 @@ from app.infrastructure.utils.token_filters import (
     build_milvus_token_filter_expr,
     normalize_request_token_filters,
 )
+from app.infrastructure.utils.exact_filters import ExactFilterConfig
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 
@@ -41,6 +42,7 @@ class _Uow(_AsyncCtx):
 
 
 def _build_orchestrator() -> HybridSearchOrchestrator:
+    """Создаёт оркестратор с минимальным набором моков для unit-тестов."""
     orchestrator = HybridSearchOrchestrator.__new__(HybridSearchOrchestrator)
     orchestrator.queue = SimpleNamespace(
         tprefix="ticket:",
@@ -79,6 +81,8 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
         w_dense=1.0,
         w_lex=0.0,
         w_ce=0.0,
+        fusion_mode="weighted_score",
+        rrf_k=60,
         top_k=3,
     )
     orchestrator.switches = SimpleNamespace(
@@ -95,6 +99,9 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
         raw_fields=("role", "product", "component"), token_suffix="_tokens", raw_separator=";"
     )
     orchestrator.dense_metric = "unit"
+    orchestrator.exact_filter_config = ExactFilterConfig(
+        raw_fields=("actual",), field_suffix="_filter"
+    )
     orchestrator.reranker_pairs_fields = ["question"]
     orchestrator.morph = None
 
@@ -254,6 +261,7 @@ async def test_documents_search_cache_key_depends_on_data_version() -> None:
 
 @pytest.mark.asyncio
 async def test_documents_search_cache_hit_uses_current_data_version() -> None:
+    """Проверяет, что cache hit запрашивается с актуальной data_version."""
     orchestrator = _build_orchestrator()
     cached_payload = json.dumps([{"ext_id": "cached"}], ensure_ascii=False)
     orchestrator.redis.get = AsyncMock(
@@ -299,3 +307,28 @@ async def test_documents_search_cache_key_depends_on_exact_filters() -> None:
 
     assert first_cache_key != second_cache_key
     assert "actual_filter=" in first_cache_key
+
+
+@pytest.mark.asyncio
+async def test_documents_search_cache_key_depends_on_fusion_mode() -> None:
+    """Проверяет, что cache key различается для разных fusion_mode и rrf_k."""
+    orchestrator = _build_orchestrator()
+    orchestrator_module.get_or_create_search_data_version = AsyncMock(return_value="dv-1")
+    pack_payload = json.dumps({"query": "KB-12345", "top_k": 3})
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    orchestrator.settings.fusion_mode = "weighted_score"
+    orchestrator.settings.rrf_k = 60
+    orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None])
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+    weighted_key = orchestrator.redis.get.await_args_list[1].args[0]
+
+    orchestrator.settings.fusion_mode = "rrf"
+    orchestrator.settings.rrf_k = 100
+    orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None])
+    await orchestrator.documents_search("task-2", "ticket-2", "pack", "result")
+    rrf_key = orchestrator.redis.get.await_args_list[1].args[0]
+
+    assert weighted_key != rrf_key
+    assert "fusion=weighted_score:rrf_k=60" in weighted_key
+    assert "fusion=rrf:rrf_k=100" in rrf_key

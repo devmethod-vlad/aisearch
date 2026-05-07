@@ -142,6 +142,8 @@ class HybridSearchSettings(EnvBaseSettings):
         "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
     intermediate_results_top_k: int
+    fusion_mode: str = "weighted_score"
+    rrf_k: int = 60
 
     @model_validator(mode="after")
     def assemble_hybrid_settings(self) -> tp.Self:
@@ -150,6 +152,12 @@ class HybridSearchSettings(EnvBaseSettings):
             self.merge_fields = [
                 f.strip() for f in self.merge_fields.split(",") if f.strip()
             ]
+
+        self.fusion_mode = self.fusion_mode.strip().lower()
+        if self.fusion_mode not in {"weighted_score", "rrf"}:
+            raise ValueError("fusion_mode должен быть weighted_score или rrf")
+        if self.rrf_k < 1:
+            raise ValueError("rrf_k должен быть >= 1")
 
         return self
 
