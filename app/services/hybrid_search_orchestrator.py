@@ -26,12 +26,6 @@ from app.infrastructure.adapters.interfaces import (
 from app.infrastructure.adapters.light_interfaces import ILLMQueue
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.unit_of_work.interfaces import IUnitOfWork
-from app.infrastructure.utils.metrics import _convert_to_ms_or_return_0, _now_ms
-from app.infrastructure.utils.nlp import hash_query, normalize_query
-from app.infrastructure.utils.search_cache_version import (
-    build_search_cache_key,
-    get_or_create_search_data_version,
-)
 from app.infrastructure.utils.exact_filters import (
     ExactFilterConfig,
     NormalizedExactFilters,
@@ -39,6 +33,12 @@ from app.infrastructure.utils.exact_filters import (
     build_opensearch_exact_filter_clauses,
     combine_milvus_filter_exprs,
     normalize_request_exact_filters,
+)
+from app.infrastructure.utils.metrics import _convert_to_ms_or_return_0, _now_ms
+from app.infrastructure.utils.nlp import hash_query, normalize_query
+from app.infrastructure.utils.search_cache_version import (
+    build_search_cache_key,
+    get_or_create_search_data_version,
 )
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
@@ -169,7 +169,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         raw_query = str(pack["query"]).strip()
         raw_filters: dict[str, list[str] | None] = {
-            raw_field: pack.get(raw_field) for raw_field in self.token_filter_config.raw_fields
+            raw_field: pack.get(raw_field)
+            for raw_field in self.token_filter_config.raw_fields
         }
         # Нормализация token-фильтров в терминах token-полей (role_tokens и т.п.).
         token_filters = normalize_request_token_filters(
@@ -186,7 +187,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         token_filter_cache_key = token_filters.cache_key_part()
         exact_filter_cache_key = exact_filters.cache_key_part()
-        filter_cache_key = f"tokens:{token_filter_cache_key};exact:{exact_filter_cache_key}"
+        filter_cache_key = (
+            f"tokens:{token_filter_cache_key};exact:{exact_filter_cache_key}"
+        )
 
         milvus_token_filter_expr = build_milvus_token_filter_expr(token_filters)
         milvus_exact_filter_expr = build_milvus_exact_filter_expr(exact_filters)
@@ -261,9 +264,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 presearch_enabled = bool(settings_local.presearch_enabled)
                 presearch_field = settings_local.presearch_field
-                presearch_key_part = (
-                    f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
-                )
+                presearch_key_part = f"{int(presearch_enabled)}:{presearch_field}:{hash_query(raw_query)}"
                 filters_key_part = filter_cache_key
                 data_version = None
                 cache_key = ""
@@ -537,6 +538,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         query: str,
         k: int,
         token_filters: NormalizedTokenFilters,
+        exact_filters: NormalizedExactFilters,
     ) -> list[dict[str, tp.Any]]:
         """Получает lexical-кандидатов из OpenSearch с учётом token-фильтров.
 
@@ -704,9 +706,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         # Fallback: расширяем окно кандидатов и фильтруем exact-match локально.
         fallback_body = {
             "query": {
-                "bool": {
-                    "must": {"match_phrase": {field_name: {"query": query}}}
-                }
+                "bool": {"must": {"match_phrase": {field_name: {"query": query}}}}
             }
         }
         fallback_hits = await os_adapter.search(fallback_body, 20)
