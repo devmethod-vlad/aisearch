@@ -39,15 +39,17 @@ class IHybridSearchService(abc.ABC):
         self,
         query: str,
         top_k: int,
-        role: list[str] | None = None,
-        product: list[str] | None = None,
-        component: list[str] | None = None,
+        array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
     ) -> TaskResponse:
-        """Постановка задачи поиска с token-фильтрами по metadata-полям.
+        """Постановка задачи поиска с metadata-фильтрами.
 
-        Поддерживает raw-фильтры `role`, `product`, `component`; дальнейшая
-        нормализация и применение выполняются в worker/orchestrator.
+        `array_filters` содержит фильтры по мультизначным полям
+        `role`/`product`/`component` (внешний API-контракт).
+        `exact_filters` содержит фильтры по single-value полям
+        `source`/`actual`/`second_line`.
+
+        Дальнейшая нормализация и применение выполняются в worker/orchestrator.
         """
         pass
 
