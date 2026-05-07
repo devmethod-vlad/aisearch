@@ -285,11 +285,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     collection_name=settings_local.collection_name,
                     index_name=self.os_index_name,
                 )
+                hybrid_version = (
+                    f"{settings_local.version}"
+                    f":fusion={settings_local.fusion_mode}"
+                    f":rrf_k={settings_local.rrf_k}"
+                )
                 cache_key = build_search_cache_key(
                     collection_name=settings_local.collection_name,
                     index_name=self.os_index_name,
                     data_version=data_version,
-                    hybrid_version=settings_local.version,
+                    hybrid_version=hybrid_version,
                     query_hash=query_hash,
                     top_k=top_k,
                     presearch_key_part=presearch_key_part,
@@ -391,10 +396,25 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
 
-                    merged = self._merge_candidates(dense, lex)
+                    if settings_local.fusion_mode == "rrf":
+                        merged = self._merge_candidates_rrf(
+                            dense=dense,
+                            lex=lex,
+                            w_dense=w_dense,
+                            w_lex=w_lex,
+                            rrf_k=settings_local.rrf_k,
+                        )
+                    else:
+                        merged = self._merge_candidates(dense, lex)
+                        for item in merged:
+                            item["score_fusion"] = (
+                                w_dense * float(item.get("score_dense", 0.0))
+                                + w_lex * float(item.get("score_lex", 0.0))
+                            )
 
-                    # ---- Cross-encoder ----
-                    if w_ce > 0.0 and merged:
+                    # ---- Cross-encoder final rerank stage ----
+                    reranker_enabled = bool(switches_local.use_reranker and w_ce > 0.0)
+                    if reranker_enabled and merged:
                         start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
 
@@ -424,6 +444,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         w_dense=w_dense,
                         w_lex=w_lex,
                         w_ce=w_ce,
+                        fusion_mode=settings_local.fusion_mode,
                     )
                     if presearch_result:
                         _results = self._inject_presearch_result(
@@ -462,7 +483,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         )[: self.intermediate_results_top_k]
                     else:
                         intermediate_results["lex"] = []
-                    if merged and w_ce > 0.0:
+                    if merged:
+                        intermediate_results["fusion"] = sorted(
+                            merged, key=lambda x: x.get("score_fusion", 0.0), reverse=True
+                        )[: self.intermediate_results_top_k]
+                    else:
+                        intermediate_results["fusion"] = []
+                    if merged and reranker_enabled:
                         intermediate_results["ce"] = sorted(
                             merged, key=lambda x: x.get("score_ce", 0.0), reverse=True
                         )[: self.intermediate_results_top_k]
@@ -536,6 +563,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_w_ce": w_ce,
                         "hybrid_w_dense": w_dense,
                         "hybrid_w_lex": w_lex,
+                        "hybrid_fusion_mode": settings_local.fusion_mode,
+                        "hybrid_rrf_k": settings_local.rrf_k,
+                        "hybrid_score_final_mode": (
+                            "cross_encoder_final" if reranker_enabled and merged else "fusion_only"
+                        ),
                         "encoder_model": self.model_name,
                         "reranker_model": self.ce_model_name,
                     }
@@ -903,6 +935,44 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         return out
 
+    def _merge_candidates_rrf(
+        self,
+        dense: list[dict[str, tp.Any]],
+        lex: list[dict[str, tp.Any]],
+        *,
+        w_dense: float,
+        w_lex: float,
+        rrf_k: int,
+    ) -> list[dict[str, tp.Any]]:
+        """Объединяет dense/lex-кандидатов через RRF.
+
+        Метод сохраняет текущую семантику merge по merge_by_field/merge_fields и
+        дополняет её score_rrf_raw + score_fusion (нормализованный RRF).
+        """
+        merged = self._merge_candidates(dense, lex)
+        merge_key = self.settings.merge_by_field
+        dense_sorted = sorted(dense, key=lambda x: float(x.get("score_dense", 0.0)), reverse=True)
+        lex_sorted = sorted(lex, key=lambda x: float(x.get("score_lex", 0.0)), reverse=True)
+        rrf_scores: dict[str, float] = {}
+
+        for rank, item in enumerate(dense_sorted, start=1):
+            key = item.get(merge_key)
+            if key:
+                rrf_scores[key] = rrf_scores.get(key, 0.0) + (w_dense / (rrf_k + rank))
+
+        for rank, item in enumerate(lex_sorted, start=1):
+            key = item.get(merge_key)
+            if key:
+                rrf_scores[key] = rrf_scores.get(key, 0.0) + (w_lex / (rrf_k + rank))
+
+        max_rrf = max(rrf_scores.values(), default=0.0)
+        for item in merged:
+            key = item.get(merge_key)
+            raw_rrf = float(rrf_scores.get(key, 0.0))
+            item["score_rrf_raw"] = raw_rrf
+            item["score_fusion"] = (raw_rrf / max_rrf) if max_rrf > 0.0 else 0.0
+        return merged
+
     def _score_and_slice(
         self,
         items: list[dict[str, tp.Any]],
@@ -912,26 +982,40 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         w_dense: float,
         w_lex: float,
         w_ce: float,
+        fusion_mode: str,
     ) -> list[dict[str, tp.Any]]:
+        """Формирует score_final и сортирует выдачу.
+
+        Для weighted_score score_fusion вычисляется как взвешенная сумма dense/lex.
+        Для rrf score_fusion ожидается из _merge_candidates_rrf.
+        Cross-encoder, если реально включен, всегда выступает финальным сортировщиком.
+        """
         if not items:
             return []
 
-        def _max(key: str) -> float:
-            return max((float(i.get(key, 0.0)) for i in items), default=1.0) or 1.0
-
-        m_dense = _max("score_dense")
-        # score_lex уже нормализован в _os_candidates, max там обычно == 1
-        # можно вообще не пересчитывать m_lex
         for it in items:
-            nd = float(it.get("score_dense", 0.0)) / m_dense if m_dense else 0.0
-            nl = float(it.get("score_lex", 0.0))
-            nc = float(it.get("score_ce", 0.0)) if use_ce else 0.0
+            if fusion_mode == "weighted_score" and "score_fusion" not in it:
+                it["score_fusion"] = (
+                    w_dense * float(it.get("score_dense", 0.0))
+                    + w_lex * float(it.get("score_lex", 0.0))
+                )
+            elif fusion_mode == "rrf":
+                it["score_fusion"] = float(it.get("score_fusion", 0.0))
 
-            it["score_final"] = (
-                w_dense * nd + w_lex * nl + (w_ce * nc if use_ce else 0.0)
+        effective_use_ce = bool(
+            use_ce and w_ce > 0.0 and any("score_ce" in item for item in items)
+        )
+        if effective_use_ce:
+            for it in items:
+                it["score_final"] = float(it.get("score_ce", 0.0))
+            items.sort(
+                key=lambda x: (x.get("score_ce", 0.0), x.get("score_fusion", 0.0)),
+                reverse=True,
             )
-
-        items.sort(key=lambda x: x.get("score_final", 0.0), reverse=True)
+        else:
+            for it in items:
+                it["score_final"] = float(it.get("score_fusion", 0.0))
+            items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
         return items[:top_k]
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
