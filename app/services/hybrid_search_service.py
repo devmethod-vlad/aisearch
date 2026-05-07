@@ -39,6 +39,9 @@ class HybridSearchService(IHybridSearchService):
         top_k: int,
         array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
+        search_use_cache: bool = True,
+        show_intermediate_results: bool = False,
+        presearch: dict[str, str] | None = None,
     ) -> TaskResponse:
         """Ставит задачу поиска в очередь вместе с metadata-фильтрами.
 
@@ -54,6 +57,9 @@ class HybridSearchService(IHybridSearchService):
             "top_k": top_k,
             "array_filters": array_filters or {},
             "exact_filters": exact_filters or {},
+            "search_use_cache": search_use_cache,
+            "show_intermediate_results": show_intermediate_results,
+            "presearch": presearch,
         }
         await self.redis.set(
             pack_key,

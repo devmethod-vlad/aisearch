@@ -40,7 +40,6 @@
     APP_PREFIX=
     APP_LOGS_LOCATION=app/app.log
     APP_LOG_LEVEL=INFO
-    APP_USE_CACHE=false  # Использовать ли кэширование
     APP_MODELSTORE_HOST_PATH=C:/Users/omka/models
     APP_MODELSTORE_CONTR_PATH=/usr/src/models
     APP_NORMALIZE_QUERY=true # Нормализовать ли запрос
@@ -108,8 +107,6 @@
     HYBRID_W_LEX=0.15
     HYBRID_CACHE_TTL=3600
     HYBRID_VERSION=v1
-    HYBRID_PRESEARCH_ENABLED=false
-    HYBRID_PRESEARCH_FIELD=ext_id
     HYBRID_COLLECTION_NAME=kb_default
     HYBRID_MERGE_BY_FIELD=ext_id
     HYBRID_MERGE_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
@@ -118,7 +115,6 @@
     HYBRID_DENSE_REL_MIN=0.6
     HYBRID_LEX_REL_MIN=0.5
     HYBRID_PRECUT_MIN_KEEP=3
-    HYBRID_ENABLE_INTERMEDIATE_RESULTS=true
     HYBRID_INTERMEDIATE_RESULTS_TOP_K=5
 
     # === SlowAPI ===
@@ -357,3 +353,7 @@ nvcc --version
 ```
 python3 pre_launch.py --export-only
 ```
+
+
+### Runtime-параметры поиска в API
+Параметры `search_use_cache`, `show_intermediate_results` и `presearch.field` теперь управляются только телом запроса `/hybrid-search/search`, а не env-переменными.

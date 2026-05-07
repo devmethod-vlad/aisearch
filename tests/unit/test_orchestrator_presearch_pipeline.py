@@ -40,7 +40,7 @@ class _Uow(_AsyncCtx):
         self.commit = AsyncMock()
 
 
-def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
+def _build_orchestrator() -> HybridSearchOrchestrator:
     orchestrator = HybridSearchOrchestrator.__new__(HybridSearchOrchestrator)
     orchestrator.queue = SimpleNamespace(
         tprefix="ticket:",
@@ -65,8 +65,6 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     )
 
     orchestrator.settings = SimpleNamespace(
-        presearch_enabled=True,
-        presearch_field="ext_id",
         version="v1",
         cache_ttl=120,
         collection_name="docs",
@@ -90,9 +88,7 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
     )
     orchestrator.short = SimpleNamespace(mode=False)
     orchestrator.normalize_query = False
-    orchestrator.use_cache = use_cache
     orchestrator.os_index_name = "kb_index"
-    orchestrator.enabled_intermediate_results = False
     orchestrator.response_metrics_enabled = False
     orchestrator.log_metrics_enabled = False
     orchestrator.token_filter_config = MultiValueTokenConfig(
@@ -119,7 +115,7 @@ def _build_orchestrator(*, use_cache: bool) -> HybridSearchOrchestrator:
 
 @pytest.mark.asyncio
 async def test_documents_search_cache_key_depends_on_filters() -> None:
-    orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator = _build_orchestrator()
     orchestrator_module.get_or_create_search_data_version = AsyncMock(
         return_value="dv-1"
     )
@@ -133,6 +129,7 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                 {
                     "query": "KB-12345",
                     "top_k": 3,
+                    "presearch": {"field": "ext_id"},
                     "array_filters": {
                         "role": ["Врач"],
                         "product": ["ЭМИАС"],
@@ -154,6 +151,7 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                 {
                     "query": "KB-12345",
                     "top_k": 3,
+                    "presearch": {"field": "ext_id"},
                     "array_filters": {
                         "role": ["Админ"],
                         "product": ["ЭМИАС"],
@@ -175,11 +173,11 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
 
 @pytest.mark.asyncio
 async def test_documents_search_keeps_milvus_filter_expr() -> None:
-    orchestrator = _build_orchestrator(use_cache=False)
+    orchestrator = _build_orchestrator()
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
+            {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -202,11 +200,11 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
 
 @pytest.mark.asyncio
 async def test_documents_search_injects_presearch_result_even_with_filters() -> None:
-    orchestrator = _build_orchestrator(use_cache=False)
+    orchestrator = _build_orchestrator()
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
+            {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -236,7 +234,7 @@ async def test_documents_search_injects_presearch_result_even_with_filters() -> 
 
 @pytest.mark.asyncio
 async def test_documents_search_cache_key_depends_on_data_version() -> None:
-    orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator = _build_orchestrator()
     pack_payload = json.dumps({"query": "KB-12345", "top_k": 3})
     orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None, pack_payload, None])
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -256,7 +254,7 @@ async def test_documents_search_cache_key_depends_on_data_version() -> None:
 
 @pytest.mark.asyncio
 async def test_documents_search_cache_hit_uses_current_data_version() -> None:
-    orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator = _build_orchestrator()
     cached_payload = json.dumps([{"ext_id": "cached"}], ensure_ascii=False)
     orchestrator.redis.get = AsyncMock(
         side_effect=[json.dumps({"query": "KB-1", "top_k": 1}), cached_payload]
@@ -275,7 +273,7 @@ async def test_documents_search_cache_hit_uses_current_data_version() -> None:
 @pytest.mark.asyncio
 async def test_documents_search_cache_key_depends_on_exact_filters() -> None:
     """Проверяет, что exact-фильтры участвуют в построении cache key."""
-    orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator = _build_orchestrator()
     orchestrator_module.get_or_create_search_data_version = AsyncMock(return_value="dv-1")
 
     pack_key = "pack"

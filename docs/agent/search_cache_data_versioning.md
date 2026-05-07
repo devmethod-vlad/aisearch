@@ -29,7 +29,7 @@
    - `bump` версии в формате `UTC timestamp + uuid4 hex`.
 2. В `HybridSearchOrchestrator.documents_search`:
    - удалена ручная сборка cache key;
-   - при `APP_USE_CACHE=true` перед чтением/записью кеша извлекается текущая `data_version`;
+   - перед чтением (если разрешено request-параметром `search_use_cache`) и перед записью кеша извлекается текущая `data_version`;
    - ключ строится через единый helper.
 3. В `pre_launch.py`:
    - после успешного пересоздания Milvus и/или OpenSearch выполняется bump версии;

@@ -76,3 +76,10 @@ Pack сохраняется так:
 
 ## 10. Presearch
 Presearch остаётся без фильтрации и не использует ни `array_filters`, ни `exact_filters`.
+
+
+## 11. Runtime-параметры
+Дополнительно контракт поддерживает `search_use_cache`, `show_intermediate_results` и `presearch.field`.
+- `search_use_cache=false` отключает только cache read, но не cache write.
+- `show_intermediate_results=true` возвращает `dense/lex/ce` и принудительно пропускает cache read.
+- `presearch` включается только при наличии объекта с непустым `field`.
