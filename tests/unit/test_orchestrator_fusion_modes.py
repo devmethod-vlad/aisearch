@@ -75,12 +75,16 @@ def test_merge_candidates_rrf() -> None:
         {"ext_id": "c", "question": "C", "score_lex": 0.7, "_source": "opensearch"},
     ]
 
-    merged = orchestrator._merge_candidates_rrf(dense, lex, w_dense=0.55, w_lex=0.15, rrf_k=60)
+    merged = orchestrator._merge_candidates_rrf(
+        dense, lex, w_dense=0.55, w_lex=0.15, rrf_k=60
+    )
     by_id = {item["ext_id"]: item for item in merged}
 
     assert {"a", "b", "c"} == set(by_id)
-    assert "dense" in by_id["b"]["sources"] and "opensearch" in by_id["b"]["sources"]
-    assert all("score_rrf_raw" in item and "score_fusion" in item for item in merged)
+    assert "dense" in by_id["b"]["sources"]
+    assert "opensearch" in by_id["b"]["sources"]
+    assert all("score_rrf_raw" in item for item in merged)
+    assert all("score_fusion" in item for item in merged)
     assert all(0.0 <= item["score_fusion"] <= 1.0 for item in merged)
     assert by_id["b"]["score_rrf_raw"] >= by_id["a"]["score_rrf_raw"]
 
