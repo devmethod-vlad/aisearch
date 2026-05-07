@@ -168,8 +168,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         switches_local = deepcopy(self.switches)
 
         raw_query = str(pack["query"]).strip()
+        # Внешний контракт pack использует array_filters; внутри сохраняем
+        # существующий термин token_filters как нормализованное представление.
+        raw_array_filters = pack.get("array_filters") or {}
         raw_filters: dict[str, list[str] | None] = {
-            raw_field: pack.get(raw_field)
+            raw_field: raw_array_filters.get(raw_field)
             for raw_field in self.token_filter_config.raw_fields
         }
         # Нормализация token-фильтров в терминах token-полей (role_tokens и т.п.).

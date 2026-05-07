@@ -37,16 +37,13 @@ class HybridSearchService(IHybridSearchService):
         self,
         query: str,
         top_k: int,
-        role: list[str] | None = None,
-        product: list[str] | None = None,
-        component: list[str] | None = None,
+        array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
     ) -> TaskResponse:
-        """Ставит задачу поиска в очередь вместе с входными token-фильтрами.
+        """Ставит задачу поиска в очередь вместе с metadata-фильтрами.
 
-        Поля `role`/`product`/`component` сохраняются в pack и далее читаются
-        worker-ом (`HybridSearchOrchestrator.documents_search`), где уже
-        выполняется нормализация и применение фильтрации в OpenSearch/Milvus.
+        Внешний API использует `array_filters`, а внутри orchestrator они
+        нормализуются в token-представление для OpenSearch/Milvus.
         """
         ticket_id = str(uuid.uuid4())
         pack_key = f"{self.llm_queue_settings.ticket_hash_prefix}{ticket_id}:pack"
@@ -55,9 +52,7 @@ class HybridSearchService(IHybridSearchService):
             "type": "search",
             "query": query,
             "top_k": top_k,
-            "role": role,
-            "product": product,
-            "component": component,
+            "array_filters": array_filters or {},
             "exact_filters": exact_filters or {},
         }
         await self.redis.set(

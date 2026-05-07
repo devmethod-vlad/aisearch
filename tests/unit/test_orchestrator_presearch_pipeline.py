@@ -133,9 +133,11 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                 {
                     "query": "KB-12345",
                     "top_k": 3,
-                    "role": ["Врач"],
-                    "product": ["ЭМИАС"],
-                    "component": ["Назначения"],
+                    "array_filters": {
+                        "role": ["Врач"],
+                        "product": ["ЭМИАС"],
+                        "component": ["Назначения"],
+                    },
                 }
             )
         return "[]"
@@ -152,9 +154,11 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
                 {
                     "query": "KB-12345",
                     "top_k": 3,
-                    "role": ["Админ"],
-                    "product": ["ЭМИАС"],
-                    "component": ["Назначения"],
+                    "array_filters": {
+                        "role": ["Админ"],
+                        "product": ["ЭМИАС"],
+                        "component": ["Назначения"],
+                    },
                 }
             )
         return "[]"
@@ -175,7 +179,7 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}
+            {"query": "KB-12345", "top_k": 3, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -202,7 +206,7 @@ async def test_documents_search_injects_presearch_result_even_with_filters() -> 
 
     orchestrator.redis.get = AsyncMock(
         return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}
+            {"query": "KB-12345", "top_k": 3, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
         )
     )
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
@@ -266,3 +270,34 @@ async def test_documents_search_cache_hit_uses_current_data_version() -> None:
     cache_key = orchestrator.redis.get.await_args_list[1].args[0]
 
     assert ":dv-current:" in cache_key
+
+
+@pytest.mark.asyncio
+async def test_documents_search_cache_key_depends_on_exact_filters() -> None:
+    """Проверяет, что exact-фильтры участвуют в построении cache key."""
+    orchestrator = _build_orchestrator(use_cache=True)
+    orchestrator_module.get_or_create_search_data_version = AsyncMock(return_value="dv-1")
+
+    pack_key = "pack"
+
+    async def _redis_get(key: str) -> str:
+        if key == pack_key:
+            return json.dumps({"query": "KB-12345", "top_k": 3, "exact_filters": {"actual": "Да"}})
+        return "[]"
+
+    orchestrator.redis.get = AsyncMock(side_effect=_redis_get)
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+    await orchestrator.documents_search("task-1", "ticket-1", pack_key, "result")
+    first_cache_key = orchestrator.redis.get.await_args_list[1].args[0]
+
+    async def _redis_get_second(key: str) -> str:
+        if key == pack_key:
+            return json.dumps({"query": "KB-12345", "top_k": 3, "exact_filters": {"actual": "Нет"}})
+        return "[]"
+
+    orchestrator.redis.get = AsyncMock(side_effect=_redis_get_second)
+    await orchestrator.documents_search("task-2", "ticket-2", pack_key, "result")
+    second_cache_key = orchestrator.redis.get.await_args_list[1].args[0]
+
+    assert first_cache_key != second_cache_key
+    assert "actual_filter=" in first_cache_key
