@@ -55,6 +55,10 @@ def _build_settings(upload_enabled: bool) -> SimpleNamespace:
             token_suffix="_tokens",
             raw_separator=";",
         ),
+        exact_filters=SimpleNamespace(
+            raw_fields=(),
+            field_suffix="_filter",
+        ),
         opensearch=SimpleNamespace(index_name="kb_index"),
         extract_edu=SimpleNamespace(
             deduplicated_excel_upload_enabled=upload_enabled,
@@ -162,7 +166,7 @@ async def test_update_all_logs_error_when_export_fails_and_continues(
     monkeypatch.setattr(
         updater_module,
         "prepare_dataframe",
-        lambda df, id_column, token_config: ([], [], df),
+        lambda df, id_column, token_config, exact_filter_config=None: ([], [], df),
     )
     monkeypatch.setattr(updater_module, "cleanup_resources", lambda logger: None)
 
@@ -212,7 +216,7 @@ async def test_update_all_calls_export_after_both_updates(
         "split_by_source",
         lambda df: (df[df["source"] == "ТП"], df[df["source"] == "ВиО"]),
     )
-    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config: ([], [], df))
+    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config, exact_filter_config=None: ([], [], df))
     monkeypatch.setattr(updater_module, "cleanup_resources", lambda logger: None)
 
     service._load_excel_from_edu = AsyncMock(
@@ -273,6 +277,7 @@ async def test_update_all_passes_combined_prepared_df_to_export(
         df: pd.DataFrame,
         id_column: str,
         token_config: object,
+        exact_filter_config: object | None = None,
     ) -> tuple[list[object], list[object], pd.DataFrame]:
         if df["source"].iloc[0] == "ТП":
             return ([], [], tp_prepared)
@@ -329,6 +334,7 @@ async def test_update_all_passes_filter_comparison_statistics_to_export(
         df: pd.DataFrame,
         id_column: str,
         token_config: object,
+        exact_filter_config: object | None = None,
     ) -> tuple[list[object], list[object], pd.DataFrame]:
         if df["source"].iloc[0] == "ТП":
             return ([], [], pd.DataFrame([{"source": "ТП", "ext_id": "1", "question": "Q"}]))

@@ -26,6 +26,10 @@ def _settings() -> SimpleNamespace:
             token_suffix="_tokens",
             raw_separator=";",
         ),
+        exact_filters=SimpleNamespace(
+            raw_fields=(),
+            field_suffix="_filter",
+        ),
         extract_edu=SimpleNamespace(
             deduplicated_excel_upload_enabled=False,
             deduplicated_excel_file_name_template="dedup_{timestamp}.xlsx",
@@ -112,7 +116,7 @@ async def test_update_all_bumps_once_when_any_part_changed(
         "split_by_source",
         lambda df: (df[df["source"] == "ТП"], df[df["source"] == "ВиО"]),
     )
-    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config: ([], [], df))
+    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config, exact_filter_config=None: ([], [], df))
     monkeypatch.setattr(updater_module, "cleanup_resources", lambda logger: None)
 
     service._load_excel_from_edu = AsyncMock(
@@ -149,7 +153,7 @@ async def test_update_all_does_not_bump_without_changes(
         "split_by_source",
         lambda df: (df[df["source"] == "ТП"], df[df["source"] == "ВиО"]),
     )
-    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config: ([], [], df))
+    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config, exact_filter_config=None: ([], [], df))
     monkeypatch.setattr(updater_module, "cleanup_resources", lambda logger: None)
 
     service._load_excel_from_edu = AsyncMock(
@@ -175,7 +179,7 @@ async def test_update_kb_and_vio_bump_only_on_real_changes(
     monkeypatch.setattr(updater_module, "bump_search_data_version", bump_mock)
     monkeypatch.setattr(updater_module, "rename_dataframe", lambda df, _: df)
     monkeypatch.setattr(updater_module, "validate_dataframe", lambda df, _1, id_column: df)
-    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config: ([], [], df))
+    monkeypatch.setattr(updater_module, "prepare_dataframe", lambda df, id_column, token_config, exact_filter_config=None: ([], [], df))
     monkeypatch.setattr(updater_module, "cleanup_resources", lambda logger: None)
 
     service._load_excel_from_edu = AsyncMock(

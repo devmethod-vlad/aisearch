@@ -182,11 +182,10 @@ async def test_documents_search_cache_key_depends_on_filters() -> None:
 async def test_documents_search_keeps_milvus_filter_expr() -> None:
     orchestrator = _build_orchestrator()
 
-    orchestrator.redis.get = AsyncMock(
-        return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
-        )
+    pack_payload = json.dumps(
+        {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
     )
+    orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None])
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
     orchestrator.vector_db.search = AsyncMock(
         return_value=[{"ext_id": "doc-1", "question": "q", "score_dense": 0.7}]
@@ -209,11 +208,10 @@ async def test_documents_search_keeps_milvus_filter_expr() -> None:
 async def test_documents_search_injects_presearch_result_even_with_filters() -> None:
     orchestrator = _build_orchestrator()
 
-    orchestrator.redis.get = AsyncMock(
-        return_value=json.dumps(
-            {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
-        )
+    pack_payload = json.dumps(
+        {"query": "KB-12345", "top_k": 3, "presearch": {"field": "ext_id"}, "array_filters": {"role": ["Врач"], "product": ["ЭМИАС"], "component": ["Назначения"]}}
     )
+    orchestrator.redis.get = AsyncMock(side_effect=[pack_payload, None])
     orchestrator.redis.hash_get = AsyncMock(return_value="0")
     orchestrator.settings.w_dense = 0.0
     orchestrator.vector_db.search = AsyncMock(return_value=[])
