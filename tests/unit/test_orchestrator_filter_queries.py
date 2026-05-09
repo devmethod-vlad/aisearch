@@ -3,6 +3,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from app.infrastructure.utils.exact_filters import (
+    ExactFilterConfig,
+    normalize_request_exact_filters,
+)
 from app.infrastructure.utils.token_filters import (
     MultiValueTokenConfig,
     normalize_request_token_filters,
@@ -26,7 +30,12 @@ async def test_os_candidates_builds_term_filters() -> None:
             raw_fields=("role", "product", "component"), token_suffix="_tokens", raw_separator=";"
         ),
     )
-    await orchestrator._os_candidates("тест", 5, filters)
+    exact_filters = normalize_request_exact_filters(
+        {},
+        config=ExactFilterConfig(raw_fields=(), field_suffix="_filter"),
+    )
+
+    await orchestrator._os_candidates("тест", 5, filters, exact_filters)
 
     body = os_adapter.search.await_args.args[0]
     assert body["query"]["bool"]["filter"] == [

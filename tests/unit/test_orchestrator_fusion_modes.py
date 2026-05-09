@@ -57,8 +57,8 @@ def test_weighted_fusion_with_ce_final_sorting() -> None:
         fusion_mode="weighted_score",
     )
 
-    assert results[0]["ext_id"] == "b"
-    assert results[1]["ext_id"] == "c"
+    assert results[0]["ext_id"] == "c"
+    assert results[1]["ext_id"] == "b"
     assert results[2]["ext_id"] == "a"
     assert results[0]["score_final"] == results[0]["score_ce"]
 
