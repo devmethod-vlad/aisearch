@@ -349,7 +349,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 settings_local.w_lex = self.short.w_lex
                 settings_local.w_dense = self.short.w_dense
                 settings_local.dense_top_k = self.short.dense_top_k
-                settings_local.w_ce = self.short.w_ce
                 settings_local.lex_top_k = self.short.lex_top_k
 
                 switches_local = deepcopy(self.short)
@@ -381,10 +380,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             lex_candidate = ""
         w_dense = settings_local.w_dense
         w_lex = settings_local.w_lex if switches_local.use_hybrid else 0.0
-        w_ce = settings_local.w_ce if switches_local.use_reranker else 0.0
-
         lex_enable = bool(w_lex)
-        reranker_enabled = bool(switches_local.use_reranker and w_ce > 0.0)
+        reranker_enabled = bool(switches_local.use_reranker)
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
 
@@ -420,10 +417,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     collection_name=settings_local.collection_name,
                     index_name=self.os_index_name,
                 )
-                hybrid_version = (
-                    f"{settings_local.version}"
-                    f":fusion={settings_local.fusion_mode}"
-                    f":rrf_k={settings_local.rrf_k}"
+                hybrid_version = self._build_hybrid_version(
+                    settings_local=settings_local,
+                    reranker_enabled=reranker_enabled,
                 )
                 cache_key = build_search_cache_key(
                     collection_name=settings_local.collection_name,
@@ -488,7 +484,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         presearch_result = await self._presearch_exact_match(
                             query=raw_query,
                             field_name=presearch_field,
-                            use_ce=switches_local.use_reranker,
+                            use_ce=reranker_enabled,
                         )
                         metrics["presearch_time"] = self._metrics_logger(
                             "🕒 Presearch (exact match)", presearch_start
@@ -595,10 +591,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     _results = self._score_and_slice(
                         merged,
                         top_k,
-                        use_ce=switches_local.use_reranker,
+                        use_ce=reranker_enabled,
                         w_dense=w_dense,
                         w_lex=w_lex,
-                        w_ce=w_ce,
                         fusion_mode=settings_local.fusion_mode,
                     )
                     if presearch_result:
@@ -687,7 +682,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             dense_top_k=len(dense),
                             lex_top_k=len(lex),
                             top_k=top_k,
-                            weight_ce=settings_local.w_ce,
                             weight_dense=settings_local.w_dense,
                             weight_lex=settings_local.w_lex,
                             results=results,
@@ -716,7 +710,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_dense_top_k": len(dense),
                         "hybrid_lex_top_k": len(lex),
                         "hybrid_top_k": top_k,
-                        "hybrid_w_ce": w_ce,
                         "hybrid_w_dense": w_dense,
                         "hybrid_w_lex": w_lex,
                         "hybrid_fusion_mode": settings_local.fusion_mode,
@@ -1143,7 +1136,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         use_ce: bool,
         w_dense: float,
         w_lex: float,
-        w_ce: float,
         fusion_mode: str,
     ) -> list[dict[str, tp.Any]]:
         """Формирует score_final и сортирует выдачу.
@@ -1163,9 +1155,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             elif fusion_mode == "rrf":
                 it["score_fusion"] = float(it.get("score_fusion", 0.0))
 
-        effective_use_ce = bool(
-            use_ce and w_ce > 0.0 and any("score_ce" in item for item in items)
-        )
+        effective_use_ce = bool(use_ce and any("score_ce" in item for item in items))
         if effective_use_ce:
             for it in items:
                 it["score_final"] = float(it.get("score_ce", 0.0))
@@ -1178,6 +1168,24 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 it["score_final"] = float(it.get("score_fusion", 0.0))
             items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
         return items[:top_k]
+
+    def _build_hybrid_version(
+        self,
+        settings_local: tp.Any,
+        *,
+        reranker_enabled: bool,
+    ) -> str:
+        """Формирует версию гибридного пайплайна для cache key.
+
+        В строку версии добавляются параметры, которые влияют на итоговую
+        выдачу и предотвращают коллизии кеша между режимами с/без reranker.
+        """
+        return (
+            f"{settings_local.version}"
+            f":fusion={settings_local.fusion_mode}"
+            f":rrf_k={settings_local.rrf_k}"
+            f":reranker={int(reranker_enabled)}"
+        )
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
         fields = self.reranker_pairs_fields

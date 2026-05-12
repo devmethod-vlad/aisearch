@@ -29,7 +29,6 @@ def test_weighted_fusion_without_ce() -> None:
         use_ce=False,
         w_dense=0.55,
         w_lex=0.15,
-        w_ce=0.0,
         fusion_mode="weighted_score",
     )
 
@@ -53,7 +52,6 @@ def test_weighted_fusion_with_ce_final_sorting() -> None:
         use_ce=True,
         w_dense=0.55,
         w_lex=0.15,
-        w_ce=0.3,
         fusion_mode="weighted_score",
     )
 
@@ -103,7 +101,6 @@ def test_rrf_without_ce_uses_fusion_for_final_sort() -> None:
         use_ce=False,
         w_dense=0.55,
         w_lex=0.15,
-        w_ce=0.3,
         fusion_mode="rrf",
     )
 
@@ -126,7 +123,6 @@ def test_rrf_with_ce_final_sorting() -> None:
         use_ce=True,
         w_dense=0.55,
         w_lex=0.15,
-        w_ce=0.3,
         fusion_mode="rrf",
     )
 
@@ -134,3 +130,22 @@ def test_rrf_with_ce_final_sorting() -> None:
     assert results[1]["ext_id"] == "b"
     assert results[2]["ext_id"] == "a"
     assert results[0]["score_final"] == results[0]["score_ce"]
+
+
+def test_build_hybrid_version_contains_reranker_flag() -> None:
+    """Проверяет, что версия пайплайна учитывает effective-флаг reranker."""
+    orchestrator = _build_orchestrator()
+    settings = SimpleNamespace(version="v2", fusion_mode="rrf", rrf_k=42)
+
+    enabled_version = orchestrator._build_hybrid_version(
+        settings_local=settings,
+        reranker_enabled=True,
+    )
+    disabled_version = orchestrator._build_hybrid_version(
+        settings_local=settings,
+        reranker_enabled=False,
+    )
+
+    assert ":reranker=1" in enabled_version
+    assert ":reranker=0" in disabled_version
+    assert enabled_version != disabled_version

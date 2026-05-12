@@ -28,7 +28,6 @@ class SearchRequestCreateDTO(ArbitraryModel):
     dense_top_k: int = 0
     lex_top_k: int = 0
     top_k: int = 0
-    weight_ce: float = 0.0
     weight_dense: float = 0.0
     weight_lex: float = 0.0
     results: list[dict[str, tp.Any]] = Field(default_factory=list)

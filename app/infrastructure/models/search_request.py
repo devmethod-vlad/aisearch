@@ -48,7 +48,6 @@ class SearchRequest(Base):
     dense_top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     lex_top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     top_k: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    weight_ce: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     weight_dense: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     weight_lex: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     results: Mapped[dict] = mapped_column(JSONB, nullable=False, default=list)
@@ -163,11 +162,6 @@ class SearchRequest(Base):
         Index(
             "ix_search_request_top_k",
             "top_k",
-            postgresql_using="btree",
-        ),
-        Index(
-            "ix_search_request_weight_ce",
-            "weight_ce",
             postgresql_using="btree",
         ),
         Index(

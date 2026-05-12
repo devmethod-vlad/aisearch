@@ -80,7 +80,6 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
         precut_min_keep=1,
         w_dense=1.0,
         w_lex=0.0,
-        w_ce=0.0,
         fusion_mode="weighted_score",
         rrf_k=60,
         top_k=3,

@@ -13,7 +13,7 @@
 Раньше итоговый score мог собираться как сумма трёх компонентов:
 
 ```text
-score_final = w_dense * score_dense + w_lex * score_lex + w_ce * score_ce
+score_final = score_ce (если reranker включен) или score_fusion (если reranker выключен)
 ```
 
 Такая схема смешивает retrieval-сигналы и rerank-сигнал в одной формуле. Новая модель проще:
@@ -91,7 +91,7 @@ score_fusion = w_dense * score_dense + w_lex * score_lex
 - `w_dense` — `HYBRID_W_DENSE`;
 - `w_lex` — `HYBRID_W_LEX`.
 
-`HYBRID_W_CE` больше не должен участвовать в этой формуле.
+`SEARCH_USE_RERANKER` больше не должен участвовать в этой формуле.
 
 Если cross-encoder выключен:
 
@@ -193,18 +193,18 @@ score_fusion += HYBRID_W_LEX * score_lex
 score_rrf_raw += HYBRID_W_LEX / (rrf_k + lex_rank)
 ```
 
-### `HYBRID_W_CE`
+### `SEARCH_USE_RERANKER`
 
-`HYBRID_W_CE` больше не является весом в итоговой формуле.
+`SEARCH_USE_RERANKER` больше не является весом в итоговой формуле.
 
 Рекомендуемая новая семантика:
 
 ```text
-SEARCH_USE_RERANKER=true и HYBRID_W_CE > 0.0 -> cross-encoder запускается
-SEARCH_USE_RERANKER=false или HYBRID_W_CE == 0.0 -> cross-encoder не запускается
+SEARCH_USE_RERANKER=true -> cross-encoder запускается
+SEARCH_USE_RERANKER=false -> cross-encoder не запускается
 ```
 
-Если cross-encoder запущен, он финально сортирует результаты независимо от численного значения `HYBRID_W_CE`.
+Если cross-encoder запущен, он финально сортирует результаты когда флаг включен.
 
 ## 7. Поля score в результате
 
@@ -295,7 +295,7 @@ fusion
 1. Fusion отвечает только за объединение dense/lex.
 2. Cross-encoder не участвует в RRF.
 3. Cross-encoder всегда финальный сортировщик, если включён.
-4. Старую формулу с `w_ce * score_ce` в `score_final` не возвращать.
+4. Старую формулу с `w_ce` в `score_final` не возвращать.
 5. При выключенном cross-encoder выдача сортируется по `score_fusion`.
 6. `weighted_score` не удалять: это режим обратной совместимости.
 7. Request-driven runtime из PR #15 не откатывать.
@@ -309,7 +309,6 @@ fusion
 HYBRID_FUSION_MODE=weighted_score
 HYBRID_RRF_K=60
 SEARCH_USE_RERANKER=true
-HYBRID_W_CE=0.3
 ```
 
 RRF с cross-encoder:
@@ -318,7 +317,6 @@ RRF с cross-encoder:
 HYBRID_FUSION_MODE=rrf
 HYBRID_RRF_K=60
 SEARCH_USE_RERANKER=true
-HYBRID_W_CE=0.3
 ```
 
 RRF без cross-encoder:
