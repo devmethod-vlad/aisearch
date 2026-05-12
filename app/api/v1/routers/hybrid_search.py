@@ -50,6 +50,7 @@ async def get_documents(
         exact_filters=exact_filters,
         search_use_cache=body.search_use_cache,
         show_intermediate_results=body.show_intermediate_results,
+        metrics_enable=body.metrics_enable,
         presearch=presearch,
     )
     return JSONResponse(content=jsonable_encoder(response), status_code=202)

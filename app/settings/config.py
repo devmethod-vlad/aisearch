@@ -521,10 +521,13 @@ class ShortSettings(EnvBaseSettings):
 
 
 class SearchMetricsEnabled(EnvBaseSettings):
-    """Вывод временных метрик поиска"""
+    """Настройки логирования временных метрик поиска.
+
+    Включение метрик в response-пейлоад управляется runtime-параметром
+    `metrics_enable` в `/hybrid-search/search`.
+    """
 
     log_metrics_enabled: bool = True
-    response_metrics_enabled: bool = True
 
     model_config = SettingsConfigDict(env_prefix="timeit_")
 

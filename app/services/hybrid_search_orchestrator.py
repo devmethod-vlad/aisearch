@@ -93,7 +93,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.os_index_name = settings.opensearch.index_name
         self.intermediate_results_top_k = settings.hybrid.intermediate_results_top_k
         self.log_metrics_enabled = settings.search_metrics.log_metrics_enabled
-        self.response_metrics_enabled = settings.search_metrics.response_metrics_enabled
         self.token_filter_config = MultiValueTokenConfig(
             raw_fields=settings.token_filters.raw_fields,
             token_suffix=settings.token_filters.token_suffix,
@@ -163,6 +162,33 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "invalid exact_filters: expected object/dict with filter names as keys"
             )
         return raw_exact_filters
+
+    def _resolve_top_k_for_fresh_search(
+        self,
+        pack: dict[str, tp.Any],
+        settings_local: tp.Any,
+    ) -> int:
+        """Возвращает effective `top_k` для нового pipeline-поиска.
+
+        Если `top_k` явно передан в request/pack — используется он.
+        Иначе берётся текущее значение `settings_local.top_k` (включая short-mode
+        override, если он уже применён).
+        """
+        requested_top_k = pack.get("top_k")
+        if requested_top_k is not None:
+            return int(requested_top_k)
+        return int(settings_local.top_k)
+
+    def _resolve_top_k_for_cached_response(
+        self,
+        pack: dict[str, tp.Any],
+        settings_local: tp.Any,
+    ) -> int:
+        """Возвращает `top_k` для cached-response с fallback для legacy pack."""
+        cached_top_k = pack.get("top_k")
+        if cached_top_k is not None:
+            return int(cached_top_k)
+        return int(settings_local.top_k)
 
     async def documents_search(
         self,
@@ -290,14 +316,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             normalize_start = time.perf_counter()
             query = normalize_query(query=raw_query, morph=self.morph)
             query_hash = hash_query(query)
-            top_k = int(pack["top_k"])
             metrics["normalize_time"] = self._metrics_logger(
                 "🕒 Normalize query", normalize_start
             )
         else:
             query = raw_query
-            top_k = int(pack["top_k"])
             query_hash = raw_query
+
+        top_k = self._resolve_top_k_for_fresh_search(pack, settings_local)
 
         if switches_local.use_opensearch:
             lex_candidate = "OpenSearch"
@@ -322,6 +348,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 search_use_cache = bool(pack.get("search_use_cache", True))
                 show_intermediate_results = bool(pack.get("show_intermediate_results", False))
+                metrics_enable = bool(pack.get("metrics_enable", False))
                 presearch_config = pack.get("presearch") or None
 
                 presearch_field = None
@@ -374,6 +401,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
+                    top_k = self._resolve_top_k_for_cached_response(pack, settings_local)
                     cache_parse_start = time.perf_counter()
                     results = json.loads(cached)
                     metrics["cache_parse_time"] = self._metrics_logger(
@@ -596,7 +624,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
                 payload["search_request_id"] = str(search_request.id)
 
-                if self.response_metrics_enabled:
+                if metrics_enable:
                     payload["metrics"] = {
                         "presearch_time": metrics.get("presearch_time"),
                         "presearch_enabled": presearch_enabled,

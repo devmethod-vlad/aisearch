@@ -36,11 +36,12 @@ class HybridSearchService(IHybridSearchService):
     async def enqueue_search(
         self,
         query: str,
-        top_k: int,
+        top_k: int | None = None,
         array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
         search_use_cache: bool = True,
         show_intermediate_results: bool = False,
+        metrics_enable: bool = False,
         presearch: dict[str, str] | None = None,
     ) -> TaskResponse:
         """Ставит задачу поиска в очередь вместе с metadata-фильтрами.
@@ -59,6 +60,7 @@ class HybridSearchService(IHybridSearchService):
             "exact_filters": exact_filters or {},
             "search_use_cache": search_use_cache,
             "show_intermediate_results": show_intermediate_results,
+            "metrics_enable": metrics_enable,
             "presearch": presearch,
         }
         await self.redis.set(
