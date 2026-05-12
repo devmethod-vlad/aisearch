@@ -110,7 +110,7 @@ class HybridSearchService(IHybridSearchService):
                 results=results or [],
                 search_request_id=search_request_id or "",
                 metrics=metrics,
-                intermediate_results=intermediate_results or {},
+                intermediate_results=intermediate_results,
             ),
             answer=answer,
         )
