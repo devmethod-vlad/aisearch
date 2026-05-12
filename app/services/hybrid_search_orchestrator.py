@@ -239,6 +239,29 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             return data, None
         raise ValueError("invalid search-cache payload: expected object or list")
 
+    def _apply_short_settings(
+        self,
+        settings_local: tp.Any,
+        switches_local: tp.Any,
+    ) -> tuple[tp.Any, tp.Any]:
+        """Применяет short-mode override к effective search-настройкам.
+
+        Функция используется в `documents_search`, когда short-mode действительно
+        сработал (`SHORT_MODE=true` и длина запроса <= `SHORT_MODE_LIMIT`).
+        Обновляет retrieval и fusion-параметры, а также переключатели веток
+        pipeline (hybrid/opensearch/reranker) на short-значения.
+        """
+        settings_local.top_k = self.short.top_k
+        settings_local.w_lex = self.short.w_lex
+        settings_local.w_dense = self.short.w_dense
+        settings_local.dense_top_k = self.short.dense_top_k
+        settings_local.lex_top_k = self.short.lex_top_k
+        settings_local.fusion_mode = self.short.fusion_mode
+        settings_local.rrf_k = self.short.rrf_k
+
+        switches_local = deepcopy(self.short)
+        return settings_local, switches_local
+
     async def documents_search(
         self,
         task_id: str,
@@ -288,6 +311,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         settings_local = deepcopy(self.settings)
         switches_local = deepcopy(self.switches)
+        short_mode_applied = False
 
         raw_query = str(pack["query"]).strip()
         # Внешний контракт pack использует array_filters; внутри сохраняем
@@ -344,14 +368,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             if len(query_tokens) <= self.short.mode_limit:
                 override_start = time.perf_counter()
                 self.logger.info("Используем short настройки для запроса")
+                short_mode_applied = True
 
-                settings_local.top_k = self.short.top_k
-                settings_local.w_lex = self.short.w_lex
-                settings_local.w_dense = self.short.w_dense
-                settings_local.dense_top_k = self.short.dense_top_k
-                settings_local.lex_top_k = self.short.lex_top_k
-
-                switches_local = deepcopy(self.short)
+                settings_local, switches_local = self._apply_short_settings(
+                    settings_local=settings_local,
+                    switches_local=switches_local,
+                )
                 self._metrics_logger(
                     label="🕒 Override (short mode)", start_time=override_start
                 )
@@ -714,6 +736,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_w_lex": w_lex,
                         "hybrid_fusion_mode": settings_local.fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
+                        "short_mode_applied": short_mode_applied,
                         "hybrid_score_final_mode": (
                             "cross_encoder_final"
                             if reranker_enabled and merged
