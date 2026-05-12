@@ -225,13 +225,17 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         if isinstance(data, dict):
             results = data.get("results")
             if not isinstance(results, list):
-                raise ValueError("invalid search-cache payload: 'results' must be a list")
+                raise ValueError(
+                    "invalid search-cache payload: 'results' must be a list"
+                )
             intermediate_results = data.get("intermediate_results")
             if not isinstance(intermediate_results, dict):
                 intermediate_results = None
             return results, intermediate_results
         if isinstance(data, list):
-            self.logger.warning("Legacy search-cache list format was read; use object payload")
+            self.logger.warning(
+                "Legacy search-cache list format was read; use object payload"
+            )
             return data, None
         raise ValueError("invalid search-cache payload: expected object or list")
 
@@ -392,7 +396,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
 
                 search_use_cache = bool(pack.get("search_use_cache", True))
-                show_intermediate_results = bool(pack.get("show_intermediate_results", False))
+                show_intermediate_results = bool(
+                    pack.get("show_intermediate_results", False)
+                )
                 metrics_enable = bool(pack.get("metrics_enable", False))
                 presearch_config = pack.get("presearch") or None
 
@@ -442,7 +448,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
-                    top_k = self._resolve_top_k_for_cached_response(pack, settings_local)
+                    top_k = self._resolve_top_k_for_cached_response(
+                        pack, settings_local
+                    )
                     cache_parse_start = time.perf_counter()
                     try:
                         cached_results, cached_intermediate_results = (
@@ -456,7 +464,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         cached_intermediate_results = None
                     if cached_results:
                         results = cached_results
-                        if show_intermediate_results and cached_intermediate_results is not None:
+                        if (
+                            show_intermediate_results
+                            and cached_intermediate_results is not None
+                        ):
                             intermediate_results = tp.cast(
                                 dict[str, list[dict[str, tp.Any]]],
                                 cached_intermediate_results,
@@ -553,10 +564,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     else:
                         merged = self._merge_candidates(dense, lex)
                         for item in merged:
-                            item["score_fusion"] = (
-                                w_dense * float(item.get("score_dense", 0.0))
-                                + w_lex * float(item.get("score_lex", 0.0))
-                            )
+                            item["score_fusion"] = w_dense * float(
+                                item.get("score_dense", 0.0)
+                            ) + w_lex * float(item.get("score_lex", 0.0))
 
                     # ---- Cross-encoder final rerank stage ----
                     if reranker_enabled and merged:
@@ -603,7 +613,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     if show_intermediate_results:
                         intermediate_results = {
                             "dense": sorted(
-                                dense, key=lambda x: x.get("score_dense", 0.0), reverse=True
+                                dense,
+                                key=lambda x: x.get("score_dense", 0.0),
+                                reverse=True,
                             )[: self.intermediate_results_top_k],
                             "lex": sorted(
                                 lex, key=lambda x: x.get("score_lex", 0.0), reverse=True
@@ -613,13 +625,15 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                                 key=lambda x: x.get("score_fusion", 0.0),
                                 reverse=True,
                             )[: self.intermediate_results_top_k],
-                            "ce": sorted(
-                                merged or [],
-                                key=lambda x: x.get("score_ce", 0.0),
-                                reverse=True,
-                            )[: self.intermediate_results_top_k]
-                            if reranker_enabled
-                            else [],
+                            "ce": (
+                                sorted(
+                                    merged or [],
+                                    key=lambda x: x.get("score_ce", 0.0),
+                                    reverse=True,
+                                )[: self.intermediate_results_top_k]
+                                if reranker_enabled
+                                else []
+                            ),
                         }
 
                     cache_payload_raw = self._dump_search_cache_payload(
@@ -636,7 +650,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     "🕒 Total search", start_total
                 )
 
-                payload = {"results": results}
+                payload: dict[str, tp.Any] = {"results": results}
                 if show_intermediate_results and intermediate_results is not None:
                     payload["intermediate_results"] = intermediate_results
                 metrics["full_search_task_time"] = _now_ms() - int(queued_at)
@@ -708,7 +722,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_fusion_mode": settings_local.fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
                         "hybrid_score_final_mode": (
-                            "cross_encoder_final" if reranker_enabled and merged else "fusion_only"
+                            "cross_encoder_final"
+                            if reranker_enabled and merged
+                            else "fusion_only"
                         ),
                         "encoder_model": self.model_name,
                         "reranker_model": self.ce_model_name,
@@ -1093,8 +1109,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         """
         merged = self._merge_candidates(dense, lex)
         merge_key = self.settings.merge_by_field
-        dense_sorted = sorted(dense, key=lambda x: float(x.get("score_dense", 0.0)), reverse=True)
-        lex_sorted = sorted(lex, key=lambda x: float(x.get("score_lex", 0.0)), reverse=True)
+        dense_sorted = sorted(
+            dense, key=lambda x: float(x.get("score_dense", 0.0)), reverse=True
+        )
+        lex_sorted = sorted(
+            lex, key=lambda x: float(x.get("score_lex", 0.0)), reverse=True
+        )
         rrf_scores: dict[str, float] = {}
 
         for rank, item in enumerate(dense_sorted, start=1):
@@ -1137,10 +1157,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         for it in items:
             if fusion_mode == "weighted_score" and "score_fusion" not in it:
-                it["score_fusion"] = (
-                    w_dense * float(it.get("score_dense", 0.0))
-                    + w_lex * float(it.get("score_lex", 0.0))
-                )
+                it["score_fusion"] = w_dense * float(
+                    it.get("score_dense", 0.0)
+                ) + w_lex * float(it.get("score_lex", 0.0))
             elif fusion_mode == "rrf":
                 it["score_fusion"] = float(it.get("score_fusion", 0.0))
 
