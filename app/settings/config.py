@@ -37,6 +37,21 @@ def _validate_cron_update_times(v: str) -> str:
     return v
 
 
+def _normalize_fusion_mode(value: str) -> str:
+    """Нормализует режим fusion и проверяет его на допустимые значения."""
+    normalized = value.strip().lower()
+    if normalized not in {"weighted_score", "rrf"}:
+        raise ValueError("fusion_mode должен быть weighted_score или rrf")
+    return normalized
+
+
+def _validate_rrf_k(value: int) -> int:
+    """Проверяет, что параметр RRF имеет валидное значение (>= 1)."""
+    if value < 1:
+        raise ValueError("rrf_k должен быть >= 1")
+    return value
+
+
 class AppSettings(EnvBaseSettings):
     """Настройки приложения FastAPI."""
 
@@ -223,11 +238,8 @@ class HybridSearchSettings(EnvBaseSettings):
                 f.strip() for f in self.merge_fields.split(",") if f.strip()
             ]
 
-        self.fusion_mode = self.fusion_mode.strip().lower()
-        if self.fusion_mode not in {"weighted_score", "rrf"}:
-            raise ValueError("fusion_mode должен быть weighted_score или rrf")
-        if self.rrf_k < 1:
-            raise ValueError("rrf_k должен быть >= 1")
+        self.fusion_mode = _normalize_fusion_mode(self.fusion_mode)
+        self.rrf_k = _validate_rrf_k(self.rrf_k)
 
         return self
 
@@ -514,6 +526,15 @@ class ShortSettings(EnvBaseSettings):
     top_k: int = 5
     w_dense: float = 0.25
     w_lex: float = 0.15
+    fusion_mode: str = "weighted_score"
+    rrf_k: int = 60
+
+    @model_validator(mode="after")
+    def assemble_short_settings(self) -> tp.Self:
+        """Нормализует и валидирует short-параметры fusion stage."""
+        self.fusion_mode = _normalize_fusion_mode(self.fusion_mode)
+        self.rrf_k = _validate_rrf_k(self.rrf_k)
+        return self
 
     model_config = SettingsConfigDict(env_prefix="short_")
 

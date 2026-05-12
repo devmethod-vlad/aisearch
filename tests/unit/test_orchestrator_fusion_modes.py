@@ -149,3 +149,44 @@ def test_build_hybrid_version_contains_reranker_flag() -> None:
     assert ":reranker=1" in enabled_version
     assert ":reranker=0" in disabled_version
     assert enabled_version != disabled_version
+
+
+def test_apply_short_settings_overrides_fusion_and_rrf_k() -> None:
+    """Проверяет, что short override подменяет fusion_mode и rrf_k в effective settings."""
+    orchestrator = _build_orchestrator()
+    orchestrator.short = SimpleNamespace(
+        top_k=3,
+        w_lex=0.7,
+        w_dense=0.3,
+        dense_top_k=11,
+        lex_top_k=12,
+        fusion_mode="rrf",
+        rrf_k=30,
+        use_hybrid=True,
+        use_opensearch=True,
+        use_reranker=False,
+        mode=True,
+        mode_limit=4,
+    )
+    settings_local = SimpleNamespace(
+        top_k=10,
+        w_lex=0.15,
+        w_dense=0.55,
+        dense_top_k=50,
+        lex_top_k=20,
+        fusion_mode="weighted_score",
+        rrf_k=60,
+    )
+    switches_local = SimpleNamespace(
+        use_hybrid=False,
+        use_opensearch=False,
+        use_reranker=True,
+    )
+
+    updated_settings, _ = orchestrator._apply_short_settings(
+        settings_local=settings_local,
+        switches_local=switches_local,
+    )
+
+    assert updated_settings.fusion_mode == "rrf"
+    assert updated_settings.rrf_k == 30
