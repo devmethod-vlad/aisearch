@@ -190,6 +190,51 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             return int(cached_top_k)
         return int(settings_local.top_k)
 
+    def _dump_search_cache_payload(
+        self,
+        *,
+        results: list[dict[str, tp.Any]],
+        intermediate_results: dict[str, tp.Any] | None = None,
+    ) -> str:
+        """Сериализует search-cache payload только в новой object-схеме.
+
+        Функция используется в `documents_search` перед записью в Redis и
+        гарантирует единый формат cache entry:
+        - обязательное поле `results` всегда присутствует;
+        - поле `intermediate_results` добавляется только при переданном значении;
+        - legacy list-формат и служебный `schema_version` не используются.
+        """
+        payload: dict[str, tp.Any] = {"results": results}
+        if intermediate_results is not None:
+            payload["intermediate_results"] = intermediate_results
+        return json.dumps(payload, ensure_ascii=False)
+
+    def _load_search_cache_payload(
+        self,
+        raw: str,
+    ) -> tuple[list[dict[str, tp.Any]], dict[str, tp.Any] | None]:
+        """Десериализует search-cache payload с безопасным fallback для legacy.
+
+        Используется при cache read внутри `documents_search`:
+        - новый формат: dict с `results` и опциональным `intermediate_results`;
+        - legacy формат: list результатов (поддерживается только для чтения);
+        - неизвестный/битый формат: поднимается `ValueError`, чтобы обработать
+          entry как контролируемый cache miss, не падая всем поиском.
+        """
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            results = data.get("results")
+            if not isinstance(results, list):
+                raise ValueError("invalid search-cache payload: 'results' must be a list")
+            intermediate_results = data.get("intermediate_results")
+            if not isinstance(intermediate_results, dict):
+                intermediate_results = None
+            return results, intermediate_results
+        if isinstance(data, list):
+            self.logger.warning("Legacy search-cache list format was read; use object payload")
+            return data, None
+        raise ValueError("invalid search-cache payload: expected object or list")
+
     async def documents_search(
         self,
         task_id: str,
@@ -387,14 +432,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                 # show_intermediate_results требует свежего исполнения pipeline,
                 # так как intermediate_results не хранятся в legacy result-cache.
-                allow_cache_read = search_use_cache and not show_intermediate_results
+                allow_cache_read = search_use_cache
                 cached = await self.redis.get(cache_key) if allow_cache_read else None
-
-                if show_intermediate_results:
-                    self.logger.debug(
-                        "Cache read skipped because show_intermediate_results=True requires fresh pipeline execution"
-                    )
-                elif not search_use_cache:
+                intermediate_results: dict[str, list[dict[str, tp.Any]]] | None = None
+                if not search_use_cache:
                     self.logger.debug(
                         "Cache read skipped because request search_use_cache=False"
                     )
@@ -403,12 +444,32 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     self.logger.info("📦 Выдаем результат из кеша")
                     top_k = self._resolve_top_k_for_cached_response(pack, settings_local)
                     cache_parse_start = time.perf_counter()
-                    results = json.loads(cached)
+                    try:
+                        cached_results, cached_intermediate_results = (
+                            self._load_search_cache_payload(cached)
+                        )
+                    except (json.JSONDecodeError, ValueError) as cache_error:
+                        self.logger.warning(
+                            f"Search-cache payload parse failed for key={cache_key}: {cache_error}"
+                        )
+                        cached_results = []
+                        cached_intermediate_results = None
+                    if cached_results:
+                        results = cached_results
+                        if show_intermediate_results and cached_intermediate_results is not None:
+                            intermediate_results = tp.cast(
+                                dict[str, list[dict[str, tp.Any]]],
+                                cached_intermediate_results,
+                            )
+                        else:
+                            intermediate_results = None
+                    else:
+                        cached = None
                     metrics["cache_parse_time"] = self._metrics_logger(
                         "🕒 Cache parse", cache_parse_start
                     )
                     merged = None
-                else:
+                if not cached:
                     # ---- Presearch ----
                     presearch_result = None
                     if presearch_enabled and presearch_field:
@@ -539,10 +600,35 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         )
 
                     results = _results
+                    if show_intermediate_results:
+                        intermediate_results = {
+                            "dense": sorted(
+                                dense, key=lambda x: x.get("score_dense", 0.0), reverse=True
+                            )[: self.intermediate_results_top_k],
+                            "lex": sorted(
+                                lex, key=lambda x: x.get("score_lex", 0.0), reverse=True
+                            )[: self.intermediate_results_top_k],
+                            "fusion": sorted(
+                                merged or [],
+                                key=lambda x: x.get("score_fusion", 0.0),
+                                reverse=True,
+                            )[: self.intermediate_results_top_k],
+                            "ce": sorted(
+                                merged or [],
+                                key=lambda x: x.get("score_ce", 0.0),
+                                reverse=True,
+                            )[: self.intermediate_results_top_k]
+                            if reranker_enabled
+                            else [],
+                        }
 
+                    cache_payload_raw = self._dump_search_cache_payload(
+                        results=results,
+                        intermediate_results=intermediate_results,
+                    )
                     await self.redis.set(
                         cache_key,
-                        json.dumps(results, ensure_ascii=False),
+                        cache_payload_raw,
                         ttl=settings_local.cache_ttl,
                     )
 
@@ -551,35 +637,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
 
                 payload = {"results": results}
-                if show_intermediate_results:
-                    intermediate_results: dict[str, list[dict[str, tp.Any]]] = {}
-
-                    if dense:
-                        intermediate_results["dense"] = sorted(
-                            dense, key=lambda x: x.get("score_dense", 0.0), reverse=True
-                        )[: self.intermediate_results_top_k]
-                    else:
-                        intermediate_results["dense"] = []
-
-                    if lex:
-                        intermediate_results["lex"] = sorted(
-                            lex, key=lambda x: x.get("score_lex", 0.0), reverse=True
-                        )[: self.intermediate_results_top_k]
-                    else:
-                        intermediate_results["lex"] = []
-                    if merged:
-                        intermediate_results["fusion"] = sorted(
-                            merged, key=lambda x: x.get("score_fusion", 0.0), reverse=True
-                        )[: self.intermediate_results_top_k]
-                    else:
-                        intermediate_results["fusion"] = []
-                    if merged and reranker_enabled:
-                        intermediate_results["ce"] = sorted(
-                            merged, key=lambda x: x.get("score_ce", 0.0), reverse=True
-                        )[: self.intermediate_results_top_k]
-                    else:
-                        intermediate_results["ce"] = []
-
+                if show_intermediate_results and intermediate_results is not None:
                     payload["intermediate_results"] = intermediate_results
                 metrics["full_search_task_time"] = _now_ms() - int(queued_at)
                 search_request: SearchRequestSchema = (
