@@ -120,6 +120,64 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
     return orchestrator
 
 
+def test_extract_array_filters_validation() -> None:
+    """Проверяет валидные и невалидные входы для array_filters."""
+    orchestrator = _build_orchestrator()
+
+    assert orchestrator._extract_array_filters({"query": "q"}) == {}
+    assert orchestrator._extract_array_filters({"array_filters": None}) == {}
+    assert orchestrator._extract_array_filters({"array_filters": {}}) == {}
+    assert orchestrator._extract_array_filters({"array_filters": {"role": ["Врач"]}}) == {
+        "role": ["Врач"]
+    }
+    assert orchestrator._extract_array_filters({"array_filters": {"role": []}}) == {
+        "role": []
+    }
+    assert orchestrator._extract_array_filters({"array_filters": {"role": None}}) == {
+        "role": None
+    }
+
+    with pytest.raises(ValueError, match="invalid array_filters: expected object/dict"):
+        orchestrator._extract_array_filters({"array_filters": []})
+    with pytest.raises(ValueError, match="invalid array_filters: expected object/dict"):
+        orchestrator._extract_array_filters({"array_filters": "role=doctor"})
+    with pytest.raises(ValueError, match="invalid array_filters: expected object/dict"):
+        orchestrator._extract_array_filters({"array_filters": 123})
+
+    with pytest.raises(
+        ValueError,
+        match=r"invalid array_filters\.role: expected list of values or null",
+    ):
+        orchestrator._extract_array_filters({"array_filters": {"role": "Врач"}})
+    with pytest.raises(
+        ValueError,
+        match=r"invalid array_filters\.role: expected list of values or null",
+    ):
+        orchestrator._extract_array_filters({"array_filters": {"role": 123}})
+
+
+def test_extract_exact_filters_validation() -> None:
+    """Проверяет валидные и невалидные входы для exact_filters."""
+    orchestrator = _build_orchestrator()
+
+    assert orchestrator._extract_exact_filters({"query": "q"}) == {}
+    assert orchestrator._extract_exact_filters({"exact_filters": None}) == {}
+    assert orchestrator._extract_exact_filters({"exact_filters": {}}) == {}
+    assert orchestrator._extract_exact_filters({"exact_filters": {"source": "kb"}}) == {
+        "source": "kb"
+    }
+    assert orchestrator._extract_exact_filters({"exact_filters": {"source": 123}}) == {
+        "source": 123
+    }
+
+    with pytest.raises(ValueError, match="invalid exact_filters: expected object/dict"):
+        orchestrator._extract_exact_filters({"exact_filters": []})
+    with pytest.raises(ValueError, match="invalid exact_filters: expected object/dict"):
+        orchestrator._extract_exact_filters({"exact_filters": "source=kb"})
+    with pytest.raises(ValueError, match="invalid exact_filters: expected object/dict"):
+        orchestrator._extract_exact_filters({"exact_filters": 123})
+
+
 @pytest.mark.asyncio
 async def test_documents_search_cache_key_depends_on_filters() -> None:
     orchestrator = _build_orchestrator()
@@ -235,6 +293,28 @@ async def test_documents_search_injects_presearch_result_even_with_filters() -> 
 
     assert payload["results"][0]["ext_id"] == "KB-12345"
     assert payload["results"][0]["_source"] == "presearch"
+
+
+@pytest.mark.asyncio
+async def test_documents_search_fails_early_on_invalid_array_filters_type() -> None:
+    """Проверяет ранний fail в documents_search при невалидном array_filters."""
+    orchestrator = _build_orchestrator()
+
+    pack_payload = json.dumps(
+        {"query": "KB-12345", "top_k": 3, "array_filters": []}
+    )
+    orchestrator.redis.get = AsyncMock(return_value=pack_payload)
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    result = await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    assert result["status"] == "error"
+    assert "invalid array_filters" in result["error"]
+    orchestrator.queue.set_failed.assert_awaited_once()
+    orchestrator.queue.ack.assert_awaited_once()
+    orchestrator.vector_db.search.assert_not_called()
+    orchestrator.os_adapter.search.assert_not_called()
+    orchestrator.redis.set.assert_not_called()
 
 
 @pytest.mark.asyncio
