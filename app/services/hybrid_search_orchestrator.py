@@ -253,8 +253,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         w_ce = settings_local.w_ce if switches_local.use_reranker else 0.0
 
         lex_enable = bool(w_lex)
-        reranker_enable = bool(w_ce)
+        reranker_enabled = bool(switches_local.use_reranker and w_ce > 0.0)
         dense, lex = [], []
+        merged: list[dict[str, tp.Any]] | None = None
 
         try:
             async with self.sem.acquire(), self.uow:
@@ -413,7 +414,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             )
 
                     # ---- Cross-encoder final rerank stage ----
-                    reranker_enabled = bool(switches_local.use_reranker and w_ce > 0.0)
                     if reranker_enabled and merged:
                         start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
@@ -524,7 +524,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             ),
                             model_name=self.model_name,
                             reranker_name=self.ce_model_name,
-                            reranker_enable=reranker_enable,
+                            reranker_enable=reranker_enabled,
                             lex_enable=lex_enable,
                             from_cache=bool(metrics.get("cache_parse_time")),
                             lex_candidate=lex_candidate,
@@ -554,7 +554,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "full_search_task_time": metrics.get("full_search_task_time"),
                         "cross_encoder_time": metrics.get("cross_encoder_time"),
                         "total_time": metrics.get("total_search_time"),
-                        "reranker_enabled": reranker_enable,
+                        "reranker_enabled": reranker_enabled,
                         "open_search_enabled": lex_enable,
                         "from_cache": metrics.get("cache_parse_time", False),
                         "hybrid_dense_top_k": len(dense),
