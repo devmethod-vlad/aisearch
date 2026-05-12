@@ -198,7 +198,6 @@ class HybridSearchSettings(EnvBaseSettings):
     dense_top_k: int = 20
     lex_top_k: int = 50
     top_k: int = 5
-    w_ce: float = 0.6
     w_dense: float = 0.25
     w_lex: float = 0.15
     dense_abs_min: float = 0.25
@@ -513,7 +512,6 @@ class ShortSettings(EnvBaseSettings):
     dense_top_k: int = 20
     lex_top_k: int = 50
     top_k: int = 5
-    w_ce: float = 0.6
     w_dense: float = 0.25
     w_lex: float = 0.15
 

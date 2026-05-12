@@ -30,7 +30,6 @@ class SearchRequestFilter(BaseFilter):
     dense_top_k: NumberFilter | None = None
     lex_top_k: NumberFilter | None = None
     top_k: NumberFilter | None = None
-    weight_ce: NumberFilter | None = None
     weight_dense: NumberFilter | None = None
     weight_lex: NumberFilter | None = None
     results: JSONBFilter | None = None

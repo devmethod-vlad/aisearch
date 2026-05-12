@@ -28,7 +28,6 @@ CREATE TABLE search_request (
     dense_top_k INTEGER NOT NULL DEFAULT 0,
     lex_top_k INTEGER NOT NULL DEFAULT 0,
     top_k INTEGER NOT NULL DEFAULT 0,
-    weight_ce REAL NOT NULL DEFAULT 0.0,
     weight_dense REAL NOT NULL DEFAULT 0.0,
     weight_lex REAL NOT NULL DEFAULT 0.0,
     results JSONB NOT NULL DEFAULT '[]',
@@ -59,7 +58,6 @@ CREATE INDEX idx_search_request_search_execution_time ON search_request USING bt
 CREATE INDEX idx_search_request_dense_top_k ON search_request USING btree (dense_top_k);
 CREATE INDEX idx_search_request_lex_top_k ON search_request USING btree (lex_top_k);
 CREATE INDEX idx_search_request_top_k ON search_request USING btree (top_k);
-CREATE INDEX idx_search_request_weight_ce ON search_request USING btree (weight_ce);
 CREATE INDEX idx_search_request_weight_dense ON search_request USING btree (weight_dense);
 CREATE INDEX idx_search_request_weight_lex ON search_request USING btree (weight_lex);
 

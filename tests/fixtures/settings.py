@@ -215,7 +215,6 @@ def test_hybrid_settings() -> HybridSearchSettings:
         dense_top_k=20,
         lex_top_k=50,
         top_k=5,
-        w_ce=0.6,
         w_dense=0.25,
         w_lex=0.15,
         dense_abs_min=0.25,
@@ -340,7 +339,6 @@ def test_short_settings() -> ShortSettings:
         dense_top_k=20,
         lex_top_k=50,
         top_k=5,
-        w_ce=0.6,
         w_dense=0.25,
         w_lex=0.15,
     )
