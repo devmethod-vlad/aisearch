@@ -51,6 +51,14 @@
     APP_PRELAUNCH_DATA_HOST_DIR=./volumes/prelaunch
     APP_PRELAUNCH_DATA_CONTR_DIR=/prelaunch
 
+    # === CORS ===
+    APP_CORS_ENABLED=false
+    APP_CORS_ALLOW_ORIGINS=
+    APP_CORS_ALLOW_ORIGIN_REGEX=
+    APP_CORS_ALLOW_METHODS=GET,POST,PUT,PATCH,DELETE,OPTIONS
+    APP_CORS_ALLOW_HEADERS=*
+    APP_CORS_ALLOW_CREDENTIALS=false
+
     ETCD_AUTO_COMPACTION_MODE=revision # periodic
     ETCD_AUTO_COMPACTION_RETENTION=1000 # time, like "1h"
     ETCD_QUOTA_BACKEND_BYTES=4294967296
@@ -362,3 +370,40 @@ python3 pre_launch.py --export-only
 Параметры `HYBRID_W_DENSE` и `HYBRID_W_LEX` используются на стадии retrieval fusion: в `weighted_score` — как веса score, в `rrf` — как веса rank contribution. `HYBRID_W_CE` больше не участвует в итоговой сумме и используется как compatibility-switch запуска reranker (`SEARCH_USE_RERANKER=true` и `HYBRID_W_CE>0`).
 
 Cross-encoder, если включен, всегда выполняет финальную сортировку (`score_final=score_ce`), а `score_fusion` используется как tie-breaker. Если cross-encoder выключен, финальная сортировка идет только по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.
+
+
+## Локальная проверка CORS для frontend (Vite)
+
+Если frontend запущен на `http://localhost:5173`, включите CORS в `.env`:
+
+```env
+APP_CORS_ENABLED=true
+APP_CORS_ALLOW_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+APP_CORS_ALLOW_METHODS=GET,POST,OPTIONS
+APP_CORS_ALLOW_HEADERS=*
+APP_CORS_ALLOW_CREDENTIALS=false
+```
+
+После изменения `.env` перезапустите backend-контейнер:
+
+```bash
+docker compose restart aisearch-app
+```
+
+или, при необходимости пересборки:
+
+```bash
+docker compose up -d --build aisearch-app
+```
+
+Ручная проверка preflight-запроса:
+
+```bash
+curl -i -X OPTIONS "http://127.0.0.1:5155/hybrid-search/search" \
+  -H "Origin: http://localhost:5173" \
+  -H "Access-Control-Request-Method: POST" \
+  -H "Access-Control-Request-Headers: content-type"
+```
+
+В ответе должны появиться CORS-заголовки, например:
+`access-control-allow-origin: http://localhost:5173`.
