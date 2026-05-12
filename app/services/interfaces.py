@@ -38,11 +38,12 @@ class IHybridSearchService(abc.ABC):
     async def enqueue_search(
         self,
         query: str,
-        top_k: int,
+        top_k: int | None = None,
         array_filters: dict[str, list[str] | None] | None = None,
         exact_filters: dict[str, str | None] | None = None,
         search_use_cache: bool = True,
         show_intermediate_results: bool = False,
+        metrics_enable: bool = False,
         presearch: dict[str, str] | None = None,
     ) -> TaskResponse:
         """Постановка задачи поиска с metadata-фильтрами.
@@ -51,6 +52,7 @@ class IHybridSearchService(abc.ABC):
         `exact_filters` содержит фильтры по single-value metadata-полям.
         `search_use_cache` разрешает чтение ранее сохранённого кеша.
         `show_intermediate_results` включает dense/lex/ce intermediate results.
+        `metrics_enable` включает блок временных метрик в ответе задачи.
         `presearch` включает presearch, если передан объект с `field`.
 
         Дальнейшая нормализация и применение выполняются в worker/orchestrator.

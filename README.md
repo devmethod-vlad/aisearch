@@ -191,7 +191,7 @@
     WARMUP_EMBED_TEXTS="Пример вопроса один;Пример вопроса два"
 
     TIMEIT_LOG_METRICS_ENABLED=true  # включить логгирование времени
-    TIMEIT_RESPONSE_METRIC_ENABLED=true # включить метрики времени в результат задачи
+    # Метрики в response включаются runtime-параметром metrics_enable в /hybrid-search/search
 
     EXTRACT_EDU_EMIAS_URL="https://edu.emias.ru"
     EXTRACT_EDU_EMIAS_TOKEN=""
@@ -366,7 +366,8 @@ python3 pre_launch.py --export-only
 
 
 ### Runtime-параметры поиска в API
-Параметры `search_use_cache`, `show_intermediate_results` и `presearch.field` теперь управляются только телом запроса `/hybrid-search/search`, а не env-переменными.
+Параметры `search_use_cache`, `show_intermediate_results`, `metrics_enable` и `presearch.field` теперь управляются только телом запроса `/hybrid-search/search`, а не env-переменными.
+`metrics_enable` по умолчанию `false`: при `false` блок `metrics` в payload результата отсутствует, при `true` — добавляется после завершения задачи.
 Параметры `HYBRID_W_DENSE` и `HYBRID_W_LEX` используются на стадии retrieval fusion: в `weighted_score` — как веса score, в `rrf` — как веса rank contribution. `HYBRID_W_CE` больше не участвует в итоговой сумме и используется как compatibility-switch запуска reranker (`SEARCH_USE_RERANKER=true` и `HYBRID_W_CE>0`).
 
 Cross-encoder, если включен, всегда выполняет финальную сортировку (`score_final=score_ce`), а `score_fusion` используется как tie-breaker. Если cross-encoder выключен, финальная сортировка идет только по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.

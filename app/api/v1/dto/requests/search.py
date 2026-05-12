@@ -53,6 +53,7 @@ class SearchRequest(BaseModel):
     Параметры runtime-поведения поиска управляются телом запроса:
     - `search_use_cache` разрешает чтение ранее сохранённого кеша результата;
     - `show_intermediate_results` включает dense/lex/ce промежуточные результаты;
+    - `metrics_enable` включает возврат блока `metrics` в финальном payload;
     - `presearch.field` включает отдельный presearch exact-match этап.
 
     Фильтры передаются через необязательный объект `filters`:
@@ -61,8 +62,17 @@ class SearchRequest(BaseModel):
     """
 
     query: str
-    top_k: int = 5
+    top_k: int | None = None
     search_use_cache: bool = True
     show_intermediate_results: bool = False
+    metrics_enable: bool = False
     presearch: SearchPresearch | None = None
     filters: SearchFilters | None = None
+
+    @field_validator("top_k")
+    @classmethod
+    def validate_top_k(cls, value: int | None) -> int | None:
+        """Валидирует `top_k`: если задан, то должен быть положительным целым."""
+        if value is not None and value <= 0:
+            raise ValueError("top_k должен быть положительным целым числом")
+        return value
