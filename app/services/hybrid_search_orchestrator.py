@@ -115,6 +115,55 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         """Переопределение логгера"""
         self.logger = logger  # type: ignore
 
+    def _extract_array_filters(
+        self,
+        pack: dict[str, tp.Any],
+    ) -> dict[str, list[str] | None]:
+        """Извлекает и валидирует контейнер `array_filters` из search pack.
+
+        Функция используется в `documents_search` перед вызовом
+        `normalize_request_token_filters`, чтобы защитить pipeline от
+        некорректного payload из Redis (например, строки или списка вместо dict).
+        Допустимая форма входа:
+        - отсутствующее поле / `null` -> `{}`;
+        - объект (`dict`) с ключами фильтров и значениями `list` или `null`.
+        """
+        raw_array_filters = pack.get("array_filters")
+        if raw_array_filters is None:
+            return {}
+        if not isinstance(raw_array_filters, dict):
+            raise ValueError(
+                "invalid array_filters: expected object/dict with filter names as keys "
+                "and lists of values as values"
+            )
+
+        for field_name, field_values in raw_array_filters.items():
+            if field_values is not None and not isinstance(field_values, list):
+                raise ValueError(
+                    f"invalid array_filters.{field_name}: expected list of values or null"
+                )
+        return tp.cast(dict[str, list[str] | None], raw_array_filters)
+
+    def _extract_exact_filters(
+        self,
+        pack: dict[str, tp.Any],
+    ) -> dict[str, tp.Any]:
+        """Извлекает и валидирует контейнер `exact_filters` из search pack.
+
+        Функция используется в `documents_search` перед вызовом
+        `normalize_request_exact_filters`, чтобы исключить падения на попытке
+        обращения к `.get(...)` у не-словаря. Валидируется только тип контейнера:
+        отсутствующее поле / `null` трактуется как `{}`, `dict` принимается как есть.
+        """
+        raw_exact_filters = pack.get("exact_filters")
+        if raw_exact_filters is None:
+            return {}
+        if not isinstance(raw_exact_filters, dict):
+            raise ValueError(
+                "invalid exact_filters: expected object/dict with filter names as keys"
+            )
+        return raw_exact_filters
+
     async def documents_search(
         self,
         task_id: str,
@@ -168,7 +217,17 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         raw_query = str(pack["query"]).strip()
         # Внешний контракт pack использует array_filters; внутри сохраняем
         # существующий термин token_filters как нормализованное представление.
-        raw_array_filters = pack.get("array_filters") or {}
+        need_ack = True
+        try:
+            raw_array_filters = self._extract_array_filters(pack)
+            raw_exact_filters = self._extract_exact_filters(pack)
+        except ValueError as validation_error:
+            error_message = str(validation_error)
+            await self.queue.set_failed(ticket_id, error_message)
+            await self.queue.ack(ticket_id)
+            need_ack = False
+            return {"status": "error", "error": error_message}
+
         raw_filters: dict[str, list[str] | None] = {
             raw_field: raw_array_filters.get(raw_field)
             for raw_field in self.token_filter_config.raw_fields
@@ -179,7 +238,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         )
         self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
 
-        raw_exact_filters = pack.get("exact_filters") or {}
         exact_filters = normalize_request_exact_filters(
             raw_exact_filters,
             config=self.exact_filter_config,
@@ -240,8 +298,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             query = raw_query
             top_k = int(pack["top_k"])
             query_hash = raw_query
-
-        need_ack = True
 
         if switches_local.use_opensearch:
             lex_candidate = "OpenSearch"
