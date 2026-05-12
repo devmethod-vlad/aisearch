@@ -66,6 +66,77 @@ class AppSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="app_")
 
 
+class CorsSettings(EnvBaseSettings):
+    """Настройки CORS для локального/стендового доступа к API из браузера."""
+
+    enabled: bool = False
+    env_separator: str = ","
+    allow_origins: tp.Annotated[tuple[str, ...], NoDecode] = ()
+    allow_origin_regex: str | None = None
+    allow_credentials: bool = False
+    allow_methods: tp.Annotated[tuple[str, ...], NoDecode] = (
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+    )
+    allow_headers: tp.Annotated[tuple[str, ...], NoDecode] = ("*",)
+
+    @field_validator("allow_origins", "allow_methods", "allow_headers", mode="before")
+    @classmethod
+    def parse_csv_tuple(
+        cls,
+        value: tp.Any,
+        info: ValidationInfo,
+    ) -> tuple[str, ...]:
+        """Преобразует CSV-строку/коллекцию в tuple значений без пустых элементов."""
+        separator = info.data.get("env_separator", ",")
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            values = [item.strip() for item in value.split(separator) if item.strip()]
+            return tuple(values)
+        if isinstance(value, (list, tuple, set)):
+            values = [str(item).strip() for item in value if str(item).strip()]
+            return tuple(values)
+        raise ValueError(f"{info.field_name} должен быть строкой или списком значений")
+
+    @field_validator("allow_origin_regex", mode="before")
+    @classmethod
+    def parse_allow_origin_regex(cls, value: tp.Any) -> str | None:
+        """Нормализует пустой regex в None для корректной передачи в middleware."""
+        if value is None:
+            return None
+        if isinstance(value, str):
+            normalized = value.strip()
+            return normalized or None
+        raise ValueError("allow_origin_regex должен быть строкой")
+
+    @model_validator(mode="after")
+    def validate_cors_consistency(self) -> tp.Self:
+        """Проверяет совместимость CORS-настроек при их явном включении."""
+        if not self.enabled:
+            return self
+
+        if not self.allow_origins and not self.allow_origin_regex:
+            raise ValueError(
+                "При APP_CORS_ENABLED=true нужно задать APP_CORS_ALLOW_ORIGINS "
+                "или APP_CORS_ALLOW_ORIGIN_REGEX"
+            )
+
+        if self.allow_credentials and "*" in self.allow_origins:
+            raise ValueError(
+                "APP_CORS_ALLOW_CREDENTIALS=true нельзя использовать вместе с "
+                "APP_CORS_ALLOW_ORIGINS, содержащим '*'"
+            )
+
+        return self
+
+    model_config = SettingsConfigDict(env_prefix="app_cors_")
+
+
 class MilvusSettings(EnvBaseSettings):
     """Настройки MilvusDB."""
 
@@ -503,6 +574,7 @@ class Settings(EnvBaseSettings):
     """Настройки проекта."""
 
     app: AppSettings = AppSettings()
+    cors: CorsSettings = CorsSettings()
     database: PostgresSettings = PostgresSettings()
     milvus: MilvusSettings = MilvusSettings()
     redis: RedisSettings = RedisSettings()

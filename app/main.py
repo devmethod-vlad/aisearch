@@ -1,6 +1,7 @@
 from dishka import make_async_container
 from dishka.integrations.fastapi import FastapiProvider, setup_dishka
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIASGIMiddleware
@@ -57,6 +58,16 @@ def create_app() -> FastAPI:
     application.include_router(requests_router)
     application.state.limiter = limiter
     application.add_middleware(SlowAPIASGIMiddleware)
+
+    if settings.cors.enabled:
+        application.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(settings.cors.allow_origins),
+            allow_origin_regex=settings.cors.allow_origin_regex,
+            allow_credentials=settings.cors.allow_credentials,
+            allow_methods=list(settings.cors.allow_methods),
+            allow_headers=list(settings.cors.allow_headers),
+        )
 
     for exception, handler in exception_config.items():
         application.add_exception_handler(exception, handler)
