@@ -254,6 +254,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         settings_local.top_k = self.short.top_k
         settings_local.w_lex = self.short.w_lex
         settings_local.w_dense = self.short.w_dense
+        settings_local.rrf_w_dense = self.short.rrf_w_dense
+        settings_local.rrf_w_lex = self.short.rrf_w_lex
         settings_local.dense_top_k = self.short.dense_top_k
         settings_local.lex_top_k = self.short.lex_top_k
         settings_local.fusion_mode = self.short.fusion_mode
@@ -400,9 +402,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         else:
             lex_candidate = ""
-        w_dense = settings_local.w_dense
-        w_lex = settings_local.w_lex if switches_local.use_hybrid else 0.0
-        lex_enable = bool(w_lex)
+        weighted_w_dense = settings_local.w_dense
+        weighted_w_lex = settings_local.w_lex if switches_local.use_hybrid else 0.0
+        rrf_w_dense = settings_local.rrf_w_dense
+        rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_hybrid else 0.0
+        lex_enable = bool(weighted_w_lex or rrf_w_lex)
         reranker_enabled = bool(switches_local.use_reranker)
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
@@ -528,7 +532,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                     # ---- Dense & Lex search ----
                     async def _dense_task() -> list[dict[str, tp.Any]]:
-                        if w_dense == 0.0:
+                        if weighted_w_dense == 0.0 and rrf_w_dense == 0.0:
                             return []
                         start = time.perf_counter()
                         res = await self.vector_db.search(
@@ -538,9 +542,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             filter_expr=milvus_filter_expr,
                         )
                         for d in res:
-                            d["score_dense"] = self._dense_to_unit(
-                                d.get("score_dense", 0.0)
-                            )
+                            raw_dense = float(d.get("score_dense", 0.0))
+                            d["score_dense_raw"] = raw_dense
+                            d["score_dense"] = self._dense_to_unit(raw_dense)
                         res = self._precut_dense(res)
                         metrics["vector_search_time"] = self._metrics_logger(
                             "🕒 Milvus search", start
@@ -548,7 +552,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         return res
 
                     async def _lex_task() -> list[dict[str, tp.Any]]:
-                        if w_lex == 0.0:
+                        if weighted_w_lex == 0.0 and rrf_w_lex == 0.0:
                             return []
                         start = time.perf_counter()
                         if switches_local.use_hybrid:
@@ -575,16 +579,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         merged = self._merge_candidates_rrf(
                             dense=dense,
                             lex=lex,
-                            w_dense=w_dense,
-                            w_lex=w_lex,
+                            w_dense=rrf_w_dense,
+                            w_lex=rrf_w_lex,
                             rrf_k=settings_local.rrf_k,
                         )
                     else:
                         merged = self._merge_candidates(dense, lex)
                         for item in merged:
-                            item["score_fusion"] = w_dense * float(
+                            item["score_fusion"] = weighted_w_dense * float(
                                 item.get("score_dense", 0.0)
-                            ) + w_lex * float(item.get("score_lex", 0.0))
+                            ) + weighted_w_lex * float(item.get("score_lex", 0.0))
 
                     # ---- Cross-encoder final rerank stage ----
                     if reranker_enabled and merged:
@@ -592,13 +596,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         pairs = [(query, self._concat_text(m)) for m in merged]
 
                         start_rank_fast = time.perf_counter()
-                        scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
+                        raw_scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
                         self._metrics_logger(
                             label="🕒 Encoder (rank_fast)", start_time=start_rank_fast
                         )
 
                         start_postprocess = time.perf_counter()
-                        scores = self.ce.ce_postprocess(scores)
+                        scores = self.ce.ce_postprocess(raw_scores)
                         self._metrics_logger(
                             label="🕒 Encoder (postprocess)",
                             start_time=start_postprocess,
@@ -607,15 +611,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         metrics["cross_encoder_time"] = self._metrics_logger(
                             "🕒 Cross-encoder rank", start
                         )
-                        for m, s in zip(merged, scores, strict=True):
+                        for m, raw, s in zip(merged, raw_scores, scores, strict=True):
+                            m["score_ce_raw"] = float(raw)
                             m["score_ce"] = float(s)
 
                     _results = self._score_and_slice(
                         merged,
                         top_k,
                         use_ce=reranker_enabled,
-                        w_dense=w_dense,
-                        w_lex=w_lex,
+                        w_dense=weighted_w_dense,
+                        w_lex=weighted_w_lex,
                         fusion_mode=settings_local.fusion_mode,
                     )
                     if presearch_result:
@@ -645,7 +650,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             "ce": (
                                 sorted(
                                     merged or [],
-                                    key=lambda x: x.get("score_ce", 0.0),
+                                    key=lambda x: x.get(
+                                        "score_ce_raw", x.get("score_ce", 0.0)
+                                    ),
                                     reverse=True,
                                 )[: self.intermediate_results_top_k]
                                 if reranker_enabled
@@ -732,8 +739,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_dense_top_k": len(dense),
                         "hybrid_lex_top_k": len(lex),
                         "hybrid_top_k": top_k,
-                        "hybrid_w_dense": w_dense,
-                        "hybrid_w_lex": w_lex,
+                        "hybrid_w_dense": weighted_w_dense,
+                        "hybrid_w_lex": weighted_w_lex,
+                        "hybrid_rrf_w_dense": rrf_w_dense,
+                        "hybrid_rrf_w_lex": rrf_w_lex,
                         "hybrid_fusion_mode": settings_local.fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
                         "short_mode_applied": short_mode_applied,
@@ -1178,12 +1187,20 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             elif fusion_mode == "rrf":
                 it["score_fusion"] = float(it.get("score_fusion", 0.0))
 
-        effective_use_ce = bool(use_ce and any("score_ce" in item for item in items))
+        effective_use_ce = bool(
+            use_ce
+            and any("score_ce_raw" in item or "score_ce" in item for item in items)
+        )
         if effective_use_ce:
             for it in items:
-                it["score_final"] = float(it.get("score_ce", 0.0))
+                it["score_final"] = float(
+                    it.get("score_ce_raw", it.get("score_ce", 0.0))
+                )
             items.sort(
-                key=lambda x: (x.get("score_ce", 0.0), x.get("score_fusion", 0.0)),
+                key=lambda x: (
+                    x.get("score_ce_raw", x.get("score_ce", 0.0)),
+                    x.get("score_fusion", 0.0),
+                ),
                 reverse=True,
             )
         else:
@@ -1207,6 +1224,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             f"{settings_local.version}"
             f":fusion={settings_local.fusion_mode}"
             f":rrf_k={settings_local.rrf_k}"
+            f":rrf_w_dense={settings_local.rrf_w_dense}"
+            f":rrf_w_lex={settings_local.rrf_w_lex}"
             f":reranker={int(reranker_enabled)}"
         )
 
@@ -1275,45 +1294,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         if self.log_metrics_enabled:
             self.logger.info(f"{label}: {value:.4f} сек")
 
-    def _dense_to_unit(self, raw: float) -> float:
-        """Приводит сырое значение dense-канала к [0,1], где 1 — лучше.
-        Поведение управляется settings.hybrid.dense_metric.
-        Допустимые значения:
-          - "ip"               : inner product при normalize_embeddings=True → в [-1,1]
-          - "cosine"           : явный cosine similarity в [-1,1]
-          - "cosine_distance"  : distance = 1 - cosine ∈ [0,2]
-          - "l2"               : (квадр.) L2-distance; для нормализованных векторов cos ≈ 1 - d/2
-          - "unit"             : уже [0,1], ничего не делаем
-        """
-        import math
+    def _dense_to_unit(self, value: float) -> float:
+        """Нормализует dense score в [0, 1] с учетом метрики Milvus."""
+        score = float(value or 0.0)
+        metric = str(self.dense_metric or "IP").upper()
 
-        m = self.dense_metric.lower()  # дефолт под normalize+IP
-        x = float(raw)
+        if metric in {"IP", "COSINE"}:
+            return max(0.0, min(1.0, score))
 
-        try:
-            if m == "unit":
-                s = x  # уже [0,1]
-            elif m in ("ip", "cosine"):
-                # cosine or dot of unit vectors: [-1, 1] → [0,1]
-                s = (x + 1.0) / 2.0
-            elif m == "cosine_distance":
-                # distance = 1 - cos  ⇒  cos = 1 - dist  ⇒  [−1,1]
-                cos = 1.0 - x
-                s = (cos + 1.0) / 2.0
-            elif m == "l2":
-                # Для unit-векторов: squared L2 ≈ 2 - 2cos  ⇒  cos ≈ 1 - d/2
-                # В Milvus/Faiss часто возвращается квадрат L2; формула устойчива и к нему.
-                cos = 1.0 - (x / 2.0)
-                s = (cos + 1.0) / 2.0
-            else:
-                s = x  # fallback, дальше зажмём
-        except Exception:
-            s = 0.0
+        if metric in {"L2", "EUCLIDEAN"}:
+            return 1.0 / (1.0 + max(0.0, score))
 
-        # жёстко зажимаем на всякий случай
-        if not math.isfinite(s):
-            s = 0.0
-        return 0.0 if s < 0.0 else 1.0 if s > 1.0 else s
+        return score
 
     def _precut_dense(
         self,
