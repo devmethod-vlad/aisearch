@@ -215,8 +215,10 @@ class HybridSearchSettings(EnvBaseSettings):
     top_k: int = 5
     w_dense: float = 0.25
     w_lex: float = 0.15
+    w_ce: float = 0.0
     rrf_w_dense: float = 1.0
     rrf_w_lex: float = 1.0
+    ce_as_final_rank: bool = True
     dense_abs_min: float = 0.25
     dense_rel_min: float = 0.6
     lex_rel_min: float = 0.5
@@ -528,6 +530,7 @@ class ShortSettings(EnvBaseSettings):
     top_k: int = 5
     w_dense: float = 0.25
     w_lex: float = 0.15
+    w_ce: float = 0.0
     rrf_w_dense: float = 1.0
     rrf_w_lex: float = 1.0
     fusion_mode: str = "weighted_score"

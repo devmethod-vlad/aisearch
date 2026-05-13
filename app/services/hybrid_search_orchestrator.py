@@ -83,9 +83,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self.switches = settings.switches
         self.ce_settings = settings.reranker
         self.short = settings.short_settings
-        self.model = SentenceTransformer(
-            settings.milvus.model_name, local_files_only=True
-        )
+        self.model = SentenceTransformer(settings.milvus.model_name, local_files_only=True)
         self.morph = pymorphy3.MorphAnalyzer()
         self.model_name = settings.milvus.model_name.split("/")[-1]
         self.ce_model_name = self.ce_settings.model_name.split("/")[-1]
@@ -132,15 +130,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             return {}
         if not isinstance(raw_array_filters, dict):
             raise ValueError(
-                "invalid array_filters: expected object/dict with filter names as keys "
-                "and lists of values as values"
+                "invalid array_filters: expected object/dict with filter names as keys and lists of values as values"
             )
 
         for field_name, field_values in raw_array_filters.items():
             if field_values is not None and not isinstance(field_values, list):
-                raise ValueError(
-                    f"invalid array_filters.{field_name}: expected list of values or null"
-                )
+                raise ValueError(f"invalid array_filters.{field_name}: expected list of values or null")
         return tp.cast(dict[str, list[str] | None], raw_array_filters)
 
     def _extract_exact_filters(
@@ -158,9 +153,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         if raw_exact_filters is None:
             return {}
         if not isinstance(raw_exact_filters, dict):
-            raise ValueError(
-                "invalid exact_filters: expected object/dict with filter names as keys"
-            )
+            raise ValueError("invalid exact_filters: expected object/dict with filter names as keys")
         return raw_exact_filters
 
     def _resolve_top_k_for_fresh_search(
@@ -225,17 +218,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         if isinstance(data, dict):
             results = data.get("results")
             if not isinstance(results, list):
-                raise ValueError(
-                    "invalid search-cache payload: 'results' must be a list"
-                )
+                raise ValueError("invalid search-cache payload: 'results' must be a list")
             intermediate_results = data.get("intermediate_results")
             if not isinstance(intermediate_results, dict):
                 intermediate_results = None
             return results, intermediate_results
         if isinstance(data, list):
-            self.logger.warning(
-                "Legacy search-cache list format was read; use object payload"
-            )
+            self.logger.warning("Legacy search-cache list format was read; use object payload")
             return data, None
         raise ValueError("invalid search-cache payload: expected object or list")
 
@@ -254,6 +243,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         settings_local.top_k = self.short.top_k
         settings_local.w_lex = self.short.w_lex
         settings_local.w_dense = self.short.w_dense
+        settings_local.w_ce = self.short.w_ce
         settings_local.rrf_w_dense = self.short.rrf_w_dense
         settings_local.rrf_w_lex = self.short.rrf_w_lex
         settings_local.dense_top_k = self.short.dense_top_k
@@ -286,18 +276,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         start_total = time.perf_counter()
         metrics: dict[str, float] = {}
 
-        queued_at = await self.redis.hash_get(
-            f"{self.queue.tprefix}{ticket_id}", "queued_at_ms"
-        )
+        queued_at = await self.redis.hash_get(f"{self.queue.tprefix}{ticket_id}", "queued_at_ms")
 
         await self.queue.set_running(ticket_id, task_id)
 
         # ---- Redis GET pack ----
         redis_get_start = time.perf_counter()
         raw = await self.redis.get(pack_key)
-        metrics["redis_get_time"] = self._metrics_logger(
-            "🕒 Redis GET pack", redis_get_start
-        )
+        metrics["redis_get_time"] = self._metrics_logger("🕒 Redis GET pack", redis_get_start)
 
         if not raw:
             await self.queue.set_failed(ticket_id, "missing pack")
@@ -307,9 +293,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         # ---- JSON parse ----
         json_parse_start = time.perf_counter()
         pack = json.loads(raw)
-        metrics["json_parse_time"] = self._metrics_logger(
-            "🕒 JSON parse", json_parse_start
-        )
+        metrics["json_parse_time"] = self._metrics_logger("🕒 JSON parse", json_parse_start)
 
         settings_local = deepcopy(self.settings)
         switches_local = deepcopy(self.switches)
@@ -330,13 +314,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             return {"status": "error", "error": error_message}
 
         raw_filters: dict[str, list[str] | None] = {
-            raw_field: raw_array_filters.get(raw_field)
-            for raw_field in self.token_filter_config.raw_fields
+            raw_field: raw_array_filters.get(raw_field) for raw_field in self.token_filter_config.raw_fields
         }
         # Нормализация token-фильтров в терминах token-полей (role_tokens и т.п.).
-        token_filters = normalize_request_token_filters(
-            raw_filters, config=self.token_filter_config
-        )
+        token_filters = normalize_request_token_filters(raw_filters, config=self.token_filter_config)
         self.logger.debug(f"Normalized token filters: {token_filters.by_token_field}")
 
         exact_filters = normalize_request_exact_filters(
@@ -347,9 +328,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         token_filter_cache_key = token_filters.cache_key_part()
         exact_filter_cache_key = exact_filters.cache_key_part()
-        filter_cache_key = (
-            f"tokens:{token_filter_cache_key};exact:{exact_filter_cache_key}"
-        )
+        filter_cache_key = f"tokens:{token_filter_cache_key};exact:{exact_filter_cache_key}"
 
         milvus_token_filter_expr = build_milvus_token_filter_expr(token_filters)
         milvus_exact_filter_expr = build_milvus_exact_filter_expr(exact_filters)
@@ -362,9 +341,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             sh_start = time.perf_counter()
 
             query_tokens = normalize_query(query=raw_query, morph=self.morph).split()
-            self._metrics_logger(
-                label="🕒 Normalize query (short mode)", start_time=sh_start
-            )
+            self._metrics_logger(label="🕒 Normalize query (short mode)", start_time=sh_start)
             # self.logger.info(f"query: {query_tokens}")
 
             if len(query_tokens) <= self.short.mode_limit:
@@ -376,9 +353,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     settings_local=settings_local,
                     switches_local=switches_local,
                 )
-                self._metrics_logger(
-                    label="🕒 Override (short mode)", start_time=override_start
-                )
+                self._metrics_logger(label="🕒 Override (short mode)", start_time=override_start)
 
             else:
                 self.logger.info("Используем обычные настройки для запроса")
@@ -388,9 +363,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             normalize_start = time.perf_counter()
             query = normalize_query(query=raw_query, morph=self.morph)
             query_hash = hash_query(query)
-            metrics["normalize_time"] = self._metrics_logger(
-                "🕒 Normalize query", normalize_start
-            )
+            metrics["normalize_time"] = self._metrics_logger("🕒 Normalize query", normalize_start)
         else:
             query = raw_query
             query_hash = raw_query
@@ -404,24 +377,23 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             lex_candidate = ""
         weighted_w_dense = settings_local.w_dense
         weighted_w_lex = settings_local.w_lex if switches_local.use_hybrid else 0.0
+        weighted_w_ce = settings_local.w_ce
         rrf_w_dense = settings_local.rrf_w_dense
         rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_hybrid else 0.0
         lex_enable = bool(weighted_w_lex or rrf_w_lex)
         reranker_enabled = bool(switches_local.use_reranker)
+        ce_as_final_rank = bool(getattr(settings_local, "ce_as_final_rank", True))
+        fusion_mode = settings_local.fusion_mode
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
 
         try:
             async with self.sem.acquire(), self.uow:
                 query_start_time = datetime.now(UTC)
-                metrics["semaphore_acquire_time"] = self._metrics_logger(
-                    "🕒 Semaphore acquire", time.perf_counter()
-                )
+                metrics["semaphore_acquire_time"] = self._metrics_logger("🕒 Semaphore acquire", time.perf_counter())
 
                 search_use_cache = bool(pack.get("search_use_cache", True))
-                show_intermediate_results = bool(
-                    pack.get("show_intermediate_results", False)
-                )
+                show_intermediate_results = bool(pack.get("show_intermediate_results", False))
                 metrics_enable = bool(pack.get("metrics_enable", False))
                 presearch_config = pack.get("presearch") or None
 
@@ -464,32 +436,21 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 cached = await self.redis.get(cache_key) if allow_cache_read else None
                 intermediate_results: dict[str, list[dict[str, tp.Any]]] | None = None
                 if not search_use_cache:
-                    self.logger.debug(
-                        "Cache read skipped because request search_use_cache=False"
-                    )
+                    self.logger.debug("Cache read skipped because request search_use_cache=False")
 
                 if cached:
                     self.logger.info("📦 Выдаем результат из кеша")
-                    top_k = self._resolve_top_k_for_cached_response(
-                        pack, settings_local
-                    )
+                    top_k = self._resolve_top_k_for_cached_response(pack, settings_local)
                     cache_parse_start = time.perf_counter()
                     try:
-                        cached_results, cached_intermediate_results = (
-                            self._load_search_cache_payload(cached)
-                        )
+                        cached_results, cached_intermediate_results = self._load_search_cache_payload(cached)
                     except (json.JSONDecodeError, ValueError) as cache_error:
-                        self.logger.warning(
-                            f"Search-cache payload parse failed for key={cache_key}: {cache_error}"
-                        )
+                        self.logger.warning(f"Search-cache payload parse failed for key={cache_key}: {cache_error}")
                         cached_results = []
                         cached_intermediate_results = None
                     if cached_results:
                         results = cached_results
-                        if (
-                            show_intermediate_results
-                            and cached_intermediate_results is not None
-                        ):
+                        if show_intermediate_results and cached_intermediate_results is not None:
                             intermediate_results = tp.cast(
                                 dict[str, list[dict[str, tp.Any]]],
                                 cached_intermediate_results,
@@ -498,23 +459,26 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             intermediate_results = None
                     else:
                         cached = None
-                    metrics["cache_parse_time"] = self._metrics_logger(
-                        "🕒 Cache parse", cache_parse_start
-                    )
+                    metrics["cache_parse_time"] = self._metrics_logger("🕒 Cache parse", cache_parse_start)
                     merged = None
                 if not cached:
                     # ---- Presearch ----
                     presearch_result = None
                     if presearch_enabled and presearch_field:
                         presearch_start = time.perf_counter()
+                        presearch_use_ce = self._should_run_cross_encoder(
+                            items=[{}],
+                            use_reranker=reranker_enabled,
+                            fusion_mode=fusion_mode,
+                            ce_as_final_rank=ce_as_final_rank,
+                            w_ce=weighted_w_ce,
+                        )
                         presearch_result = await self._presearch_exact_match(
                             query=raw_query,
                             field_name=presearch_field,
-                            use_ce=reranker_enabled,
+                            use_ce=presearch_use_ce,
                         )
-                        metrics["presearch_time"] = self._metrics_logger(
-                            "🕒 Presearch (exact match)", presearch_start
-                        )
+                        metrics["presearch_time"] = self._metrics_logger("🕒 Presearch (exact match)", presearch_start)
 
                     # ---- Embedding ----
                     encode_start = time.perf_counter()
@@ -526,9 +490,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             normalize_embeddings=True,
                         )
                     )[0]
-                    metrics["embedding_time"] = self._metrics_logger(
-                        "🕒 Model encode", encode_start
-                    )
+                    metrics["embedding_time"] = self._metrics_logger("🕒 Model encode", encode_start)
 
                     # ---- Dense & Lex search ----
                     async def _dense_task() -> list[dict[str, tp.Any]]:
@@ -546,9 +508,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             d["score_dense_raw"] = raw_dense
                             d["score_dense"] = self._dense_to_unit(raw_dense)
                         res = self._precut_dense(res)
-                        metrics["vector_search_time"] = self._metrics_logger(
-                            "🕒 Milvus search", start
-                        )
+                        metrics["vector_search_time"] = self._metrics_logger("🕒 Milvus search", start)
                         return res
 
                     async def _lex_task() -> list[dict[str, tp.Any]]:
@@ -568,9 +528,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         else:
                             res = []
                         res = self._precut_lex(res)
-                        metrics["lexical_search_time"] = self._metrics_logger(
-                            "🕒 Lexical search", start
-                        )
+                        metrics["lexical_search_time"] = self._metrics_logger("🕒 Lexical search", start)
                         return res
 
                     dense, lex = await asyncio.gather(_dense_task(), _lex_task())
@@ -590,16 +548,21 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                                 item.get("score_dense", 0.0)
                             ) + weighted_w_lex * float(item.get("score_lex", 0.0))
 
-                    # ---- Cross-encoder final rerank stage ----
-                    if reranker_enabled and merged:
+                    should_run_ce = self._should_run_cross_encoder(
+                        items=merged,
+                        use_reranker=reranker_enabled,
+                        fusion_mode=fusion_mode,
+                        ce_as_final_rank=ce_as_final_rank,
+                        w_ce=weighted_w_ce,
+                    )
+                    # ---- Cross-encoder stage ----
+                    if should_run_ce and merged:
                         start = time.perf_counter()
                         pairs = [(query, self._concat_text(m)) for m in merged]
 
                         start_rank_fast = time.perf_counter()
                         raw_scores = await asyncio.to_thread(self.ce.rank_fast, pairs)
-                        self._metrics_logger(
-                            label="🕒 Encoder (rank_fast)", start_time=start_rank_fast
-                        )
+                        self._metrics_logger(label="🕒 Encoder (rank_fast)", start_time=start_rank_fast)
 
                         start_postprocess = time.perf_counter()
                         scores = self.ce.ce_postprocess(raw_scores)
@@ -608,20 +571,24 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             start_time=start_postprocess,
                         )
 
-                        metrics["cross_encoder_time"] = self._metrics_logger(
-                            "🕒 Cross-encoder rank", start
-                        )
+                        metrics["cross_encoder_time"] = self._metrics_logger("🕒 Cross-encoder rank", start)
                         for m, raw, s in zip(merged, raw_scores, scores, strict=True):
                             m["score_ce_raw"] = float(raw)
                             m["score_ce"] = float(s)
+                    elif merged:
+                        for m in merged:
+                            m.setdefault("score_ce_raw", 0.0)
+                            m.setdefault("score_ce", 0.0)
 
                     _results = self._score_and_slice(
                         merged,
                         top_k,
-                        use_ce=reranker_enabled,
+                        use_ce=should_run_ce,
                         w_dense=weighted_w_dense,
                         w_lex=weighted_w_lex,
-                        fusion_mode=settings_local.fusion_mode,
+                        w_ce=weighted_w_ce,
+                        fusion_mode=fusion_mode,
+                        ce_as_final_rank=ce_as_final_rank,
                     )
                     if presearch_result:
                         _results = self._inject_presearch_result(
@@ -639,9 +606,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                                 key=lambda x: x.get("score_dense", 0.0),
                                 reverse=True,
                             )[: self.intermediate_results_top_k],
-                            "lex": sorted(
-                                lex, key=lambda x: x.get("score_lex", 0.0), reverse=True
-                            )[: self.intermediate_results_top_k],
+                            "lex": sorted(lex, key=lambda x: x.get("score_lex", 0.0), reverse=True)[
+                                : self.intermediate_results_top_k
+                            ],
                             "fusion": sorted(
                                 merged or [],
                                 key=lambda x: x.get("score_fusion", 0.0),
@@ -650,12 +617,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             "ce": (
                                 sorted(
                                     merged or [],
-                                    key=lambda x: x.get(
-                                        "score_ce_raw", x.get("score_ce", 0.0)
-                                    ),
+                                    key=lambda x: x.get("score_ce_raw", x.get("score_ce", 0.0)),
                                     reverse=True,
                                 )[: self.intermediate_results_top_k]
-                                if reranker_enabled
+                                if should_run_ce
                                 else []
                             ),
                         }
@@ -670,54 +635,45 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         ttl=settings_local.cache_ttl,
                     )
 
-                metrics["total_search_time"] = self._metrics_logger(
-                    "🕒 Total search", start_total
-                )
+                metrics["total_search_time"] = self._metrics_logger("🕒 Total search", start_total)
 
                 payload: dict[str, tp.Any] = {"results": results}
                 if show_intermediate_results and intermediate_results is not None:
                     payload["intermediate_results"] = intermediate_results
                 metrics["full_search_task_time"] = _now_ms() - int(queued_at)
-                search_request: SearchRequestSchema = (
-                    await self.uow.search_request.create(
-                        create_dto=SearchRequestCreateDTO(
-                            id=uuid.uuid4(),
-                            query=pack["query"],
-                            search_start_time=query_start_time,
-                            full_execution_time=_convert_to_ms_or_return_0(
-                                metrics.get("full_search_task_time")
-                            ),
-                            search_execution_time=_convert_to_ms_or_return_0(
-                                metrics.get("total_search_time")
-                            ),
-                            dense_search_time=_convert_to_ms_or_return_0(
-                                metrics.get("vector_search_time")
-                            ),
-                            lex_search_time=_convert_to_ms_or_return_0(
-                                metrics.get("lexical_search_time")
-                            ),
-                            query_norm_time=_convert_to_ms_or_return_0(
-                                metrics.get("normalize_time")
-                            ),
-                            reranker_time=_convert_to_ms_or_return_0(
-                                metrics.get("cross_encoder_time")
-                            ),
-                            model_name=self.model_name,
-                            reranker_name=self.ce_model_name,
-                            reranker_enable=reranker_enabled,
-                            lex_enable=lex_enable,
-                            from_cache=bool(metrics.get("cache_parse_time")),
-                            lex_candidate=lex_candidate,
-                            dense_top_k=len(dense),
-                            lex_top_k=len(lex),
-                            top_k=top_k,
-                            weight_dense=settings_local.w_dense,
-                            weight_lex=settings_local.w_lex,
-                            results=results,
-                        )
+                search_request: SearchRequestSchema = await self.uow.search_request.create(
+                    create_dto=SearchRequestCreateDTO(
+                        id=uuid.uuid4(),
+                        query=pack["query"],
+                        search_start_time=query_start_time,
+                        full_execution_time=_convert_to_ms_or_return_0(metrics.get("full_search_task_time")),
+                        search_execution_time=_convert_to_ms_or_return_0(metrics.get("total_search_time")),
+                        dense_search_time=_convert_to_ms_or_return_0(metrics.get("vector_search_time")),
+                        lex_search_time=_convert_to_ms_or_return_0(metrics.get("lexical_search_time")),
+                        query_norm_time=_convert_to_ms_or_return_0(metrics.get("normalize_time")),
+                        reranker_time=_convert_to_ms_or_return_0(metrics.get("cross_encoder_time")),
+                        model_name=self.model_name,
+                        reranker_name=self.ce_model_name,
+                        reranker_enable=reranker_enabled,
+                        lex_enable=lex_enable,
+                        from_cache=bool(metrics.get("cache_parse_time")),
+                        lex_candidate=lex_candidate,
+                        dense_top_k=len(dense),
+                        lex_top_k=len(lex),
+                        top_k=top_k,
+                        weight_dense=settings_local.w_dense,
+                        weight_lex=settings_local.w_lex,
+                        results=results,
                     )
                 )
                 payload["search_request_id"] = str(search_request.id)
+
+                if fusion_mode == "rrf":
+                    score_final_mode = "rrf_ce_final" if should_run_ce else "rrf_fusion_only"
+                elif ce_as_final_rank:
+                    score_final_mode = "weighted_ce_final" if should_run_ce else "weighted_fusion_only"
+                else:
+                    score_final_mode = "weighted_legacy_ce_blend" if should_run_ce else "weighted_legacy_no_ce"
 
                 if metrics_enable:
                     payload["metrics"] = {
@@ -741,16 +697,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_top_k": top_k,
                         "hybrid_w_dense": weighted_w_dense,
                         "hybrid_w_lex": weighted_w_lex,
+                        "hybrid_w_ce": weighted_w_ce,
                         "hybrid_rrf_w_dense": rrf_w_dense,
                         "hybrid_rrf_w_lex": rrf_w_lex,
-                        "hybrid_fusion_mode": settings_local.fusion_mode,
+                        "hybrid_fusion_mode": fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
+                        "hybrid_ce_as_final_rank": ce_as_final_rank,
                         "short_mode_applied": short_mode_applied,
-                        "hybrid_score_final_mode": (
-                            "cross_encoder_final"
-                            if reranker_enabled and merged
-                            else "fusion_only"
-                        ),
+                        "hybrid_score_final_mode": score_final_mode,
                         "encoder_model": self.model_name,
                         "reranker_model": self.ce_model_name,
                     }
@@ -771,9 +725,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 ack_start = time.perf_counter()
                 with contextlib.suppress(Exception):
                     await self.queue.ack(ticket_id)
-                metrics["queue_ack_time"] = self._metrics_logger(
-                    "🕒 Queue ACK", ack_start
-                )
+                metrics["queue_ack_time"] = self._metrics_logger("🕒 Queue ACK", ack_start)
 
     async def _os_candidates(
         self,
@@ -922,11 +874,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         # 1.1) Дополнительный быстрый fallback на случай отключенных скриптов.
         should_terms = [
             {"term": {field_name: {"value": query, "case_insensitive": True}}},
-            {
-                "term": {
-                    f"{field_name}.keyword": {"value": query, "case_insensitive": True}
-                }
-            },
+            {"term": {f"{field_name}.keyword": {"value": query, "case_insensitive": True}}},
         ]
         term_body = {
             "query": {
@@ -946,11 +894,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 return self._build_presearch_item(hit, output_fields, use_ce=use_ce)
 
         # Fallback: расширяем окно кандидатов и фильтруем exact-match локально.
-        fallback_body = {
-            "query": {
-                "bool": {"must": {"match_phrase": {field_name: {"query": query}}}}
-            }
-        }
+        fallback_body = {"query": {"bool": {"must": {"match_phrase": {field_name: {"query": query}}}}}}
         fallback_hits = await os_adapter.search(fallback_body, 20)
         for hit in fallback_hits:
             if self._is_case_insensitive_exact_match(
@@ -1002,6 +946,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         }
         if use_ce:
             item["score_ce"] = 0.0
+            item["score_ce_raw"] = 0.0
 
         for field in output_fields:
             item[field] = src.get(field, "")
@@ -1024,11 +969,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         filtered_results = [
             item
             for item in results
-            if not (
-                result_key_value
-                and item.get(merge_by_field)
-                and item.get(merge_by_field) == result_key_value
-            )
+            if not (result_key_value and item.get(merge_by_field) and item.get(merge_by_field) == result_key_value)
         ]
 
         merged_results = [presearch_result, *filtered_results]
@@ -1074,9 +1015,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     x[fld] = d[fld]
 
             # агрегируем dense-скор (если вдруг встретится дубль)
-            x["score_dense"] = max(
-                ffloat(x.get("score_dense", 0.0)), ffloat(d.get("score_dense", 0.0))
-            )
+            x["score_dense"] = max(ffloat(x.get("score_dense", 0.0)), ffloat(d.get("score_dense", 0.0)))
             x["sources"].add("dense")
 
         # 2) добавляем лексические кандидаты
@@ -1101,9 +1040,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     x[fld] = l[fld]
 
             # агрегируем лучший лексический скор
-            x["score_lex"] = max(
-                ffloat(x.get("score_lex", 0.0)), ffloat(l.get("score_lex", 0.0))
-            )
+            x["score_lex"] = max(ffloat(x.get("score_lex", 0.0)), ffloat(l.get("score_lex", 0.0)))
             # фиксация источника лексики
             x["sources"].add(l.get("_source", "lex"))
 
@@ -1134,12 +1071,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         """
         merged = self._merge_candidates(dense, lex)
         merge_key = self.settings.merge_by_field
-        dense_sorted = sorted(
-            dense, key=lambda x: float(x.get("score_dense", 0.0)), reverse=True
-        )
-        lex_sorted = sorted(
-            lex, key=lambda x: float(x.get("score_lex", 0.0)), reverse=True
-        )
+        dense_sorted = sorted(dense, key=lambda x: float(x.get("score_dense", 0.0)), reverse=True)
+        lex_sorted = sorted(lex, key=lambda x: float(x.get("score_lex", 0.0)), reverse=True)
         rrf_scores: dict[str, float] = {}
 
         for rank, item in enumerate(dense_sorted, start=1):
@@ -1168,7 +1101,9 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         use_ce: bool,
         w_dense: float,
         w_lex: float,
+        w_ce: float,
         fusion_mode: str,
+        ce_as_final_rank: bool,
     ) -> list[dict[str, tp.Any]]:
         """Формирует score_final и сортирует выдачу.
 
@@ -1179,35 +1114,76 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         if not items:
             return []
 
-        for it in items:
-            if fusion_mode == "weighted_score" and "score_fusion" not in it:
-                it["score_fusion"] = w_dense * float(
-                    it.get("score_dense", 0.0)
-                ) + w_lex * float(it.get("score_lex", 0.0))
-            elif fusion_mode == "rrf":
+        if fusion_mode == "rrf":
+            for it in items:
                 it["score_fusion"] = float(it.get("score_fusion", 0.0))
-
-        effective_use_ce = bool(
-            use_ce
-            and any("score_ce_raw" in item or "score_ce" in item for item in items)
-        )
-        if effective_use_ce:
-            for it in items:
-                it["score_final"] = float(
-                    it.get("score_ce_raw", it.get("score_ce", 0.0))
+            if use_ce:
+                for it in items:
+                    it["score_final"] = float(it.get("score_ce_raw", it.get("score_ce", 0.0)))
+                items.sort(
+                    key=lambda x: (x.get("score_ce_raw", x.get("score_ce", 0.0)), x.get("score_fusion", 0.0)),
+                    reverse=True,
                 )
-            items.sort(
-                key=lambda x: (
-                    x.get("score_ce_raw", x.get("score_ce", 0.0)),
-                    x.get("score_fusion", 0.0),
-                ),
-                reverse=True,
-            )
-        else:
+            else:
+                for it in items:
+                    it["score_final"] = float(it.get("score_fusion", 0.0))
+                items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
+            return items[:top_k]
+
+        if ce_as_final_rank:
             for it in items:
-                it["score_final"] = float(it.get("score_fusion", 0.0))
-            items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
+                it["score_fusion"] = w_dense * float(it.get("score_dense", 0.0)) + w_lex * float(
+                    it.get("score_lex", 0.0)
+                )
+            if use_ce:
+                for it in items:
+                    it["score_final"] = float(it.get("score_ce_raw", it.get("score_ce", 0.0)))
+                items.sort(
+                    key=lambda x: (x.get("score_ce_raw", x.get("score_ce", 0.0)), x.get("score_fusion", 0.0)),
+                    reverse=True,
+                )
+            else:
+                for it in items:
+                    it["score_final"] = float(it.get("score_fusion", 0.0))
+                items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
+            return items[:top_k]
+
+        m_dense = max(float(i.get("score_dense", 0.0)) for i in items) or 1.0
+        for it in items:
+            nd = float(it.get("score_dense", 0.0)) / m_dense if m_dense else 0.0
+            nl = float(it.get("score_lex", 0.0))
+            nc = float(it.get("score_ce", 0.0)) if use_ce and w_ce > 0.0 else 0.0
+            it["score_fusion"] = w_dense * nd + w_lex * nl
+            it["score_final"] = it["score_fusion"] + w_ce * nc
+        items.sort(key=lambda x: x.get("score_final", 0.0), reverse=True)
         return items[:top_k]
+
+    def _is_ce_final_rank_mode(
+        self,
+        *,
+        fusion_mode: str,
+        ce_as_final_rank: bool,
+    ) -> bool:
+        """Определяет режим, где cross-encoder выступает финальным ранжировщиком."""
+        return fusion_mode == "rrf" or (fusion_mode == "weighted_score" and ce_as_final_rank)
+
+    def _should_run_cross_encoder(
+        self,
+        *,
+        items: list[dict[str, tp.Any]] | None,
+        use_reranker: bool,
+        fusion_mode: str,
+        ce_as_final_rank: bool,
+        w_ce: float,
+    ) -> bool:
+        """Определяет, запускать ли cross-encoder для текущей конфигурации поиска."""
+        if not items or not use_reranker:
+            return False
+        if self._is_ce_final_rank_mode(fusion_mode=fusion_mode, ce_as_final_rank=ce_as_final_rank):
+            return True
+        if fusion_mode == "weighted_score" and not ce_as_final_rank:
+            return w_ce > 0.0
+        return False
 
     def _build_hybrid_version(
         self,
@@ -1227,6 +1203,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             f":rrf_w_dense={settings_local.rrf_w_dense}"
             f":rrf_w_lex={settings_local.rrf_w_lex}"
             f":reranker={int(reranker_enabled)}"
+            f":ce_final={int(getattr(settings_local, 'ce_as_final_rank', True))}"
+            f":w_ce={getattr(settings_local, 'w_ce', 0.0)}"
         )
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
@@ -1279,9 +1257,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             self.logger.error(f"Ошибка прогрева: ({type(e)}): {traceback.format_exc()}")
             return False
 
-    def _metrics_logger(
-        self, label: str, start_time: float, precision: int = 4
-    ) -> float:
+    def _metrics_logger(self, label: str, start_time: float, precision: int = 4) -> float:
         """Фиксирует длительность и при включённом флаге логирует."""
         elapsed = time.perf_counter() - start_time
         elapsed_rounded = round(elapsed, precision)
