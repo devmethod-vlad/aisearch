@@ -368,13 +368,15 @@ python3 pre_launch.py --export-only
 ### Runtime-параметры поиска в API
 Параметры `search_use_cache`, `show_intermediate_results`, `metrics_enable` и `presearch.field` теперь управляются только телом запроса `/hybrid-search/search`, а не env-переменными.
 `metrics_enable` по умолчанию `false`: при `false` блок `metrics` в payload результата отсутствует, при `true` — добавляется после завершения задачи.
-Параметры `HYBRID_W_DENSE` и `HYBRID_W_LEX` используются только на стадии retrieval fusion: в `weighted_score` — как веса score, в `rrf` — как веса rank contribution.
+Параметры `HYBRID_W_DENSE` и `HYBRID_W_LEX` используются только на стадии retrieval fusion: в `weighted_score` — как веса score, в `rrf` не используются; для RRF применяются `HYBRID_RRF_W_DENSE` и `HYBRID_RRF_W_LEX`.
 Когда `SHORT_MODE=true` и нормализованный запрос содержит не больше `SHORT_MODE_LIMIT` токенов, short-mode переопределяет обычные настройки:
 - `SHORT_DENSE_TOP_K` → `HYBRID_DENSE_TOP_K`
 - `SHORT_LEX_TOP_K` → `HYBRID_LEX_TOP_K`
 - `SHORT_TOP_K` → `HYBRID_TOP_K`, если `top_k` не передан в request body
 - `SHORT_W_DENSE` → `HYBRID_W_DENSE`
 - `SHORT_W_LEX` → `HYBRID_W_LEX`
+- `SHORT_RRF_W_DENSE` → `HYBRID_RRF_W_DENSE`
+- `SHORT_RRF_W_LEX` → `HYBRID_RRF_W_LEX`
 - `SHORT_FUSION_MODE` → `HYBRID_FUSION_MODE`
 - `SHORT_RRF_K` → `HYBRID_RRF_K`
 - `SHORT_USE_HYBRID` → `SEARCH_USE_HYBRID`
@@ -386,7 +388,7 @@ python3 pre_launch.py --export-only
 - `SHORT_RRF_K` влияет только при `SHORT_FUSION_MODE=rrf`;
 - если lexical-ветка отключена (`SHORT_USE_HYBRID=false` или `SHORT_USE_OPENSEARCH=false`), RRF работает только по доступным candidate lists.
 
-`SEARCH_USE_RERANKER` управляет reranker для обычного поиска, а `SHORT_USE_RERANKER` — для short-mode. Отдельных CE-весов больше нет. При `reranker_enabled=true` итоговая сортировка идет по `score_ce` (с `score_fusion` как tie-breaker), при `reranker_enabled=false` — по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.
+`SEARCH_USE_RERANKER` управляет reranker для обычного поиска, а `SHORT_USE_RERANKER` — для short-mode. Отдельных CE-весов больше нет. При `reranker_enabled=true` итоговая сортировка идет по `score_ce_raw` (с `score_fusion` как tie-breaker), а `score_ce` остается диагностическим постобработанным значением (`RERANKER_SCORE_MODE`), при `reranker_enabled=false` — по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.
 
 
 ## Локальная проверка CORS для frontend (Vite)

@@ -19,7 +19,6 @@ from app.common.logger import AISearchLogger
 from app.infrastructure.storages.interfaces import IVectorDatabase
 from app.infrastructure.utils.metrics import metrics_print
 from app.infrastructure.utils.milvus import load_schema_and_indexes_from_json
-from app.infrastructure.utils.nlp import l2_normalize
 from app.settings.config import MilvusSettings
 
 
@@ -492,7 +491,6 @@ class MilvusDatabase(IVectorDatabase):
     ) -> np.ndarray:
         """Получение эмбеддингов"""
         embeddings = model.encode(documents, normalize_embeddings=True)
-        embeddings = np.vstack([l2_normalize(e) for e in embeddings])
         return embeddings
 
     async def initialize_collection(
