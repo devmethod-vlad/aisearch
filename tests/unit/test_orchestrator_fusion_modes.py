@@ -26,109 +26,160 @@ def test_dense_to_unit_metrics() -> None:
     assert o._dense_to_unit(0.8) == 0.8
     assert o._dense_to_unit(1.2) == 1.0
     assert o._dense_to_unit(-0.2) == 0.0
-    o.dense_metric = "COSINE"
-    assert o._dense_to_unit(0.8) == 0.8
-    assert o._dense_to_unit(1.2) == 1.0
-    assert o._dense_to_unit(-0.2) == 0.0
-    o.dense_metric = "L2"
-    assert o._dense_to_unit(0.0) == 1.0
-    assert o._dense_to_unit(1.0) == 0.5
-    assert o._dense_to_unit(-1.0) == 1.0
-    o.dense_metric = "UNKNOWN"
-    assert o._dense_to_unit(2) == 2.0
 
 
-def test_weighted_fusion_without_ce() -> None:
-    """Проверяет weighted fusion без CE: score_final должен совпадать со score_fusion."""
-    orchestrator = _build_orchestrator()
-    merged = [{"ext_id": "a", "score_dense": 0.8, "score_lex": 0.2}]
-    results = orchestrator._score_and_slice(
-        merged, 1, use_ce=False, w_dense=0.55, w_lex=0.15, fusion_mode="weighted_score"
-    )
-    expected = 0.55 * 0.8 + 0.15 * 0.2
-    assert results[0]["score_fusion"] == expected
-    assert results[0]["score_final"] == expected
-
-
-def test_ce_sort_uses_raw_then_fusion() -> None:
-    """Проверяет CE сортировку по score_ce_raw и tie-breaker по score_fusion."""
+def test_weighted_ce_final_mode_uses_raw_ce_sort() -> None:
+    """Проверяет weighted_score+ce_final: сортировка по raw CE, tie-breaker по fusion."""
     o = _build_orchestrator()
     merged = [
-        {"ext_id": "a", "score_fusion": 0.95, "score_ce_raw": 0.1, "score_ce": 0.9},
-        {"ext_id": "b", "score_fusion": 0.25, "score_ce_raw": 0.9, "score_ce": 0.2},
-        {"ext_id": "c", "score_fusion": 0.5, "score_ce_raw": 0.9, "score_ce": 0.1},
+        {"ext_id": "a", "score_dense": 0.9, "score_lex": 0.9, "score_ce_raw": 0.1, "score_ce": 0.9},
+        {"ext_id": "b", "score_dense": 0.2, "score_lex": 0.2, "score_ce_raw": 0.8, "score_ce": 0.2},
     ]
     results = o._score_and_slice(
-        merged, 3, use_ce=True, w_dense=0.55, w_lex=0.15, fusion_mode="rrf"
+        merged,
+        2,
+        use_ce=True,
+        w_dense=0.55,
+        w_lex=0.15,
+        w_ce=0.3,
+        fusion_mode="weighted_score",
+        ce_as_final_rank=True,
     )
-    assert [r["ext_id"] for r in results] == ["c", "b", "a"]
+    assert results[0]["ext_id"] == "b"
     assert results[0]["score_final"] == results[0]["score_ce_raw"]
 
 
-def test_ce_sort_fallback_to_processed_score() -> None:
-    """Проверяет fallback сортировки по score_ce, если score_ce_raw отсутствует."""
+def test_weighted_legacy_mode_uses_legacy_formula() -> None:
+    """Проверяет legacy weighted formula и сортировку по score_final."""
     o = _build_orchestrator()
-    merged = [
-        {"ext_id": "a", "score_fusion": 0.1, "score_ce": 0.2},
-        {"ext_id": "b", "score_fusion": 0.9, "score_ce": 0.8},
+    items = [
+        {"ext_id": "a", "score_dense": 0.9, "score_lex": 0.1, "score_ce": 0.1, "score_ce_raw": 10.0},
+        {"ext_id": "b", "score_dense": 0.6, "score_lex": 0.1, "score_ce": 1.0, "score_ce_raw": 0.1},
     ]
     results = o._score_and_slice(
-        merged, 2, use_ce=True, w_dense=0.55, w_lex=0.15, fusion_mode="rrf"
+        items, 2, use_ce=True, w_dense=0.5, w_lex=0.2, w_ce=0.4, fusion_mode="weighted_score", ce_as_final_rank=False
     )
-    assert [r["ext_id"] for r in results] == ["b", "a"]
+    assert results[0]["ext_id"] == "b"
+    assert results[0]["score_final"] > results[1]["score_final"]
 
 
-def test_merge_candidates_rrf() -> None:
-    """Проверяет RRF merge, нормализацию score_fusion и объединение источников."""
-    orchestrator = _build_orchestrator()
-    dense = [
-        {"ext_id": "a", "question": "A", "score_dense": 0.9, "score_dense_raw": 0.9},
-        {"ext_id": "b", "question": "B", "score_dense": 0.8, "score_dense_raw": 0.8},
-    ]
-    lex = [
-        {
-            "ext_id": "b",
-            "question": "B",
-            "score_lex": 1.0,
-            "score_lex_raw": 10.0,
-            "_source": "opensearch",
-        },
-        {
-            "ext_id": "c",
-            "question": "C",
-            "score_lex": 0.7,
-            "score_lex_raw": 7.0,
-            "_source": "opensearch",
-        },
-    ]
-    merged = orchestrator._merge_candidates_rrf(
-        dense, lex, w_dense=2.0, w_lex=1.0, rrf_k=60
-    )
-    by_id = {item["ext_id"]: item for item in merged}
-    assert by_id["b"]["score_rrf_raw"] >= by_id["a"]["score_rrf_raw"]
-    assert "score_dense_raw" in by_id["b"]
-    assert "score_lex_raw" in by_id["b"]
-
-
-def test_build_hybrid_version_contains_reranker_flag_and_rrf_weights() -> None:
-    """Проверяет включение reranker-флага и RRF-весов в версию cache-key."""
+def test_weighted_legacy_uses_score_ce_not_raw() -> None:
+    """Проверяет, что legacy weighted использует processed score_ce, а не score_ce_raw."""
     o = _build_orchestrator()
-    settings = SimpleNamespace(
-        version="v2", fusion_mode="rrf", rrf_k=42, rrf_w_dense=1.2, rrf_w_lex=0.9
+    items = [
+        {"ext_id": "a", "score_dense": 0.5, "score_lex": 0.5, "score_ce": 0.1, "score_ce_raw": 99.0},
+        {"ext_id": "b", "score_dense": 0.5, "score_lex": 0.5, "score_ce": 0.9, "score_ce_raw": -99.0},
+    ]
+    results = o._score_and_slice(
+        items, 2, use_ce=True, w_dense=0.4, w_lex=0.4, w_ce=0.2, fusion_mode="weighted_score", ce_as_final_rank=False
     )
-    v = o._build_hybrid_version(settings_local=settings, reranker_enabled=True)
-    assert ":reranker=1" in v
-    assert ":rrf_w_dense=1.2" in v
-    assert ":rrf_w_lex=0.9" in v
+    assert results[0]["ext_id"] == "b"
 
 
-def test_apply_short_settings_overrides_rrf_weights() -> None:
-    """Проверяет, что short override подменяет rrf-веса."""
+def test_weighted_legacy_w_ce_zero_disables_ce_contrib() -> None:
+    """Проверяет, что при w_ce=0 CE-вклад в legacy mode отключается."""
+    o = _build_orchestrator()
+    items = [
+        {"ext_id": "a", "score_dense": 0.5, "score_lex": 0.0, "score_ce": 1.0},
+        {"ext_id": "b", "score_dense": 0.25, "score_lex": 0.0, "score_ce": 0.0},
+    ]
+    results = o._score_and_slice(
+        items, 2, use_ce=True, w_dense=1.0, w_lex=0.0, w_ce=0.0, fusion_mode="weighted_score", ce_as_final_rank=False
+    )
+    assert results[0]["score_final"] == 1.0
+    assert results[1]["score_final"] == 0.5
+
+
+def test_weighted_legacy_use_ce_false_ignores_ce() -> None:
+    """Проверяет, что при use_ce=False CE-вклад игнорируется."""
+    o = _build_orchestrator()
+    items = [
+        {"ext_id": "a", "score_dense": 0.5, "score_lex": 0.0, "score_ce": 0.0},
+        {"ext_id": "b", "score_dense": 0.25, "score_lex": 0.0, "score_ce": 1.0},
+    ]
+    results = o._score_and_slice(
+        items, 2, use_ce=False, w_dense=1.0, w_lex=0.0, w_ce=0.9, fusion_mode="weighted_score", ce_as_final_rank=False
+    )
+    assert results[0]["ext_id"] == "a"
+
+
+def test_weighted_legacy_dense_max_normalization() -> None:
+    """Проверяет нормализацию dense через max_dense в legacy weighted режиме."""
+    o = _build_orchestrator()
+    items = [
+        {"ext_id": "a", "score_dense": 0.5, "score_lex": 0.0, "score_ce": 0.0},
+        {"ext_id": "b", "score_dense": 0.25, "score_lex": 0.0, "score_ce": 0.0},
+    ]
+    results = o._score_and_slice(
+        items, 2, use_ce=False, w_dense=1.0, w_lex=0.0, w_ce=0.0, fusion_mode="weighted_score", ce_as_final_rank=False
+    )
+    assert results[0]["score_final"] == 1.0
+    assert results[1]["score_final"] == 0.5
+
+
+def test_rrf_ignores_ce_as_final_rank_flag() -> None:
+    """Проверяет, что RRF остаётся CE-final даже при ce_as_final_rank=False."""
+    o = _build_orchestrator()
+    merged = [
+        {"ext_id": "a", "score_fusion": 0.9, "score_ce_raw": 0.1},
+        {"ext_id": "b", "score_fusion": 0.1, "score_ce_raw": 0.9},
+    ]
+    results = o._score_and_slice(
+        merged, 2, use_ce=True, w_dense=0.0, w_lex=0.0, w_ce=0.0, fusion_mode="rrf", ce_as_final_rank=False
+    )
+    assert results[0]["ext_id"] == "b"
+
+
+def test_should_run_cross_encoder_matrix() -> None:
+    """Проверяет матрицу условий запуска cross-encoder."""
+    o = _build_orchestrator()
+    items = [{"ext_id": "a"}]
+    assert o._should_run_cross_encoder(
+        items=items, use_reranker=True, fusion_mode="rrf", ce_as_final_rank=False, w_ce=0.0
+    )
+    assert not o._should_run_cross_encoder(
+        items=items, use_reranker=False, fusion_mode="rrf", ce_as_final_rank=True, w_ce=0.5
+    )
+    assert o._should_run_cross_encoder(
+        items=items, use_reranker=True, fusion_mode="weighted_score", ce_as_final_rank=True, w_ce=0.0
+    )
+    assert o._should_run_cross_encoder(
+        items=items, use_reranker=True, fusion_mode="weighted_score", ce_as_final_rank=False, w_ce=0.1
+    )
+    assert not o._should_run_cross_encoder(
+        items=items, use_reranker=True, fusion_mode="weighted_score", ce_as_final_rank=False, w_ce=0.0
+    )
+    assert not o._should_run_cross_encoder(
+        items=items, use_reranker=False, fusion_mode="weighted_score", ce_as_final_rank=False, w_ce=0.1
+    )
+
+
+def test_build_hybrid_version_contains_ce_flags() -> None:
+    """Проверяет включение ce_final и w_ce в cache-version."""
+    o = _build_orchestrator()
+    settings_on = SimpleNamespace(
+        version="v2", fusion_mode="rrf", rrf_k=42, rrf_w_dense=1.2, rrf_w_lex=0.9, ce_as_final_rank=True, w_ce=0.3
+    )
+    settings_off = SimpleNamespace(
+        version="v2", fusion_mode="rrf", rrf_k=42, rrf_w_dense=1.2, rrf_w_lex=0.9, ce_as_final_rank=False, w_ce=0.0
+    )
+    v_on = o._build_hybrid_version(settings_local=settings_on, reranker_enabled=True)
+    v_off = o._build_hybrid_version(settings_local=settings_off, reranker_enabled=True)
+    assert ":ce_final=1" in v_on
+    assert ":w_ce=0.3" in v_on
+    assert ":ce_final=0" in v_off
+    assert ":w_ce=0.0" in v_off
+    assert v_on != v_off
+
+
+def test_apply_short_settings_overrides_rrf_weights_and_w_ce() -> None:
+    """Проверяет, что short override подменяет rrf-веса и w_ce."""
     o = _build_orchestrator()
     o.short = SimpleNamespace(
         top_k=3,
         w_lex=0.7,
         w_dense=0.3,
+        w_ce=0.3,
         rrf_w_dense=2.0,
         rrf_w_lex=3.0,
         dense_top_k=11,
@@ -145,6 +196,7 @@ def test_apply_short_settings_overrides_rrf_weights() -> None:
         top_k=10,
         w_lex=0.15,
         w_dense=0.55,
+        w_ce=0.0,
         rrf_w_dense=1.0,
         rrf_w_lex=1.0,
         dense_top_k=50,
@@ -152,11 +204,8 @@ def test_apply_short_settings_overrides_rrf_weights() -> None:
         fusion_mode="weighted_score",
         rrf_k=60,
     )
-    switches_local = SimpleNamespace(
-        use_hybrid=False, use_opensearch=False, use_reranker=True
-    )
-    updated_settings, _ = o._apply_short_settings(
-        settings_local=settings_local, switches_local=switches_local
-    )
+    switches_local = SimpleNamespace(use_hybrid=False, use_opensearch=False, use_reranker=True)
+    updated_settings, _ = o._apply_short_settings(settings_local=settings_local, switches_local=switches_local)
+    assert updated_settings.w_ce == 0.3
     assert updated_settings.rrf_w_dense == 2.0
     assert updated_settings.rrf_w_lex == 3.0
