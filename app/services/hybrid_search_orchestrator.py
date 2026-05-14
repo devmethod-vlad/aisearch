@@ -381,12 +381,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             lex_candidate = ""
         weighted_w_dense = settings_local.w_dense
         weighted_w_lex = settings_local.w_lex if switches_local.use_opensearch else 0.0
-        weighted_w_ce = float(getattr(settings_local, "final_w_ce", getattr(settings_local, "w_ce", 0.0)))
+        weighted_w_ce = float(getattr(settings_local, "final_w_ce", 0.0))
         rrf_w_dense = settings_local.rrf_w_dense
         rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_opensearch else 0.0
         lex_enable = bool(weighted_w_lex or rrf_w_lex)
         reranker_enabled = bool(getattr(switches_local, "use_reranker", True))
-        ce_as_final_rank = bool(getattr(settings_local, "ce_as_final_rank", True))  # TODO: migrate to final_rank_mode
+        final_rank_mode = str(getattr(settings_local, "final_rank_mode", "ce_blend"))
         fusion_mode = settings_local.fusion_mode
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
@@ -474,8 +474,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             items=[{}],
                             use_reranker=reranker_enabled,
                             fusion_mode=fusion_mode,
-                            ce_as_final_rank=ce_as_final_rank,
-                            w_ce=weighted_w_ce,
+                            final_rank_mode=final_rank_mode,
+                            final_w_ce=weighted_w_ce,
                         )
                         presearch_result = await self._presearch_exact_match(
                             query=raw_query,
@@ -553,8 +553,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         items=merged,
                         use_reranker=reranker_enabled,
                         fusion_mode=fusion_mode,
-                        ce_as_final_rank=ce_as_final_rank,
-                        w_ce=weighted_w_ce,
+                        final_rank_mode=final_rank_mode,
+                        final_w_ce=weighted_w_ce,
                     )
                     # ---- Cross-encoder stage ----
                     if should_run_ce and merged:
@@ -587,9 +587,12 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         use_ce=should_run_ce,
                         w_dense=weighted_w_dense,
                         w_lex=weighted_w_lex,
-                        w_ce=weighted_w_ce,
+                        final_w_fusion=float(getattr(settings_local, "final_w_fusion", 1.0)),
+                        final_w_ce=weighted_w_ce,
+                        final_fusion_norm=str(getattr(settings_local, "final_fusion_norm", "max")),
+                        final_ce_score=str(getattr(settings_local, "final_ce_score", "processed")),
                         fusion_mode=fusion_mode,
-                        ce_as_final_rank=ce_as_final_rank,
+                        final_rank_mode=final_rank_mode,
                     )
                     if presearch_result:
                         _results = self._inject_presearch_result(
@@ -669,12 +672,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
                 payload["search_request_id"] = str(search_request.id)
 
-                if fusion_mode == "rrf":
-                    score_final_mode = "rrf_ce_final" if should_run_ce else "rrf_fusion_only"
-                elif ce_as_final_rank:
-                    score_final_mode = "weighted_ce_final" if should_run_ce else "weighted_fusion_only"
-                else:
-                    score_final_mode = "weighted_legacy_ce_blend" if should_run_ce else "weighted_legacy_no_ce"
+                score_final_mode = str(final_rank_mode)
 
                 if metrics_enable:
                     payload["metrics"] = {
@@ -703,7 +701,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_rrf_w_lex": rrf_w_lex,
                         "hybrid_fusion_mode": fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
-                        "hybrid_ce_as_final_rank": ce_as_final_rank,
+                        "hybrid_final_rank_mode": final_rank_mode,
                         "short_mode_applied": short_mode_applied,
                         "hybrid_score_final_mode": score_final_mode,
                         "encoder_model": self.model_name,
@@ -1094,6 +1092,28 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             item["score_fusion"] = (raw_rrf / max_rrf) if max_rrf > 0.0 else 0.0
         return merged
 
+    def _normalize_scores(self, scores: list[float], mode: str) -> list[float]:
+        """Нормализует список score по выбранной стратегии.
+
+        Используется в final scoring для режимов `ce_blend` и диагностики.
+        Поддерживает:
+        - max: деление на максимум;
+        - minmax: min-max нормализация.
+        """
+        if not scores:
+            return []
+        if mode == "minmax":
+            min_score = min(scores)
+            max_score = max(scores)
+            if max_score == min_score:
+                return [1.0 for _ in scores]
+            return [(float(score) - min_score) / (max_score - min_score) for score in scores]
+
+        max_score = max(scores)
+        if max_score <= 0.0:
+            return [0.0 for _ in scores]
+        return [float(score) / max_score for score in scores]
+
     def _score_and_slice(
         self,
         items: list[dict[str, tp.Any]],
@@ -1102,71 +1122,86 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         use_ce: bool,
         w_dense: float,
         w_lex: float,
-        w_ce: float,
+        final_w_fusion: float,
+        final_w_ce: float,
+        final_fusion_norm: str,
+        final_ce_score: str,
         fusion_mode: str,
-        ce_as_final_rank: bool,
+        final_rank_mode: str,
     ) -> list[dict[str, tp.Any]]:
-        """Формирует score_final и сортирует выдачу.
-
-        Для weighted_score score_fusion вычисляется как взвешенная сумма dense/lex.
-        Для rrf score_fusion ожидается из _merge_candidates_rrf.
-        Cross-encoder, если реально включен, всегда выступает финальным сортировщиком.
-        """
+        """Формирует финальные score согласно HYBRID_FINAL_RANK_MODE и сортирует выдачу."""
         if not items:
             return []
 
-        if fusion_mode == "rrf":
-            for it in items:
-                it["score_fusion"] = float(it.get("score_fusion", 0.0))
-            if use_ce:
-                for it in items:
-                    it["score_final"] = float(it.get("score_ce_raw", it.get("score_ce", 0.0)))
-                items.sort(
-                    key=lambda x: (x.get("score_ce_raw", x.get("score_ce", 0.0)), x.get("score_fusion", 0.0)),
-                    reverse=True,
-                )
-            else:
-                for it in items:
-                    it["score_final"] = float(it.get("score_fusion", 0.0))
-                items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
-            return items[:top_k]
-
-        if ce_as_final_rank:
-            for it in items:
-                it["score_fusion"] = w_dense * float(it.get("score_dense", 0.0)) + w_lex * float(
-                    it.get("score_lex", 0.0)
-                )
-            if use_ce:
-                for it in items:
-                    it["score_final"] = float(it.get("score_ce_raw", it.get("score_ce", 0.0)))
-                items.sort(
-                    key=lambda x: (x.get("score_ce_raw", x.get("score_ce", 0.0)), x.get("score_fusion", 0.0)),
-                    reverse=True,
-                )
-            else:
-                for it in items:
-                    it["score_final"] = float(it.get("score_fusion", 0.0))
-                items.sort(key=lambda x: x.get("score_fusion", 0.0), reverse=True)
-            return items[:top_k]
-
-        m_dense = max(float(i.get("score_dense", 0.0)) for i in items) or 1.0
         for it in items:
-            nd = float(it.get("score_dense", 0.0)) / m_dense if m_dense else 0.0
-            nl = float(it.get("score_lex", 0.0))
-            nc = float(it.get("score_ce", 0.0)) if use_ce and w_ce > 0.0 else 0.0
-            it["score_fusion"] = w_dense * nd + w_lex * nl
-            it["score_final"] = it["score_fusion"] + w_ce * nc
-        items.sort(key=lambda x: x.get("score_final", 0.0), reverse=True)
-        return items[:top_k]
+            it["score_ce_raw"] = float(it.get("score_ce_raw", 0.0))
+            it["score_ce"] = float(it.get("score_ce", 0.0))
+            it["score_fusion"] = float(it.get("score_fusion", 0.0))
 
-    def _is_ce_final_rank_mode(
-        self,
-        *,
-        fusion_mode: str,
-        ce_as_final_rank: bool,
-    ) -> bool:
-        """Определяет режим, где cross-encoder выступает финальным ранжировщиком."""
-        return fusion_mode == "rrf" or (fusion_mode == "weighted_score" and ce_as_final_rank)
+        if final_rank_mode == "legacy_weighted":
+            if fusion_mode != "weighted_score":
+                self.logger.warning("legacy_weighted is supported only for weighted_score; fallback to fusion_only")
+                final_rank_mode = "fusion_only"
+            else:
+                max_dense = max(float(i.get("score_dense", 0.0)) for i in items) or 1.0
+                for it in items:
+                    score_dense_norm = float(it.get("score_dense", 0.0)) / max_dense if max_dense else 0.0
+                    ce_contrib = float(it.get("score_ce", 0.0)) if use_ce and final_w_ce > 0.0 else 0.0
+                    it["score_final"] = w_dense * score_dense_norm + w_lex * float(it.get("score_lex", 0.0)) + final_w_ce * ce_contrib
+                    it["score_final_mode"] = "weighted_score_legacy_weighted"
+                items.sort(key=lambda x: float(x.get("score_final", 0.0)), reverse=True)
+                return items[:top_k]
+
+        if final_rank_mode == "fusion_only":
+            for it in items:
+                it["score_final"] = float(it.get("score_fusion", 0.0))
+                it["score_final_mode"] = f"{fusion_mode}_fusion_only"
+            items.sort(
+                key=lambda x: (float(x.get("score_final", 0.0)), float(x.get("score_dense", 0.0)), float(x.get("score_lex", 0.0))),
+                reverse=True,
+            )
+            return items[:top_k]
+
+        if final_rank_mode == "ce_final":
+            for it in items:
+                it["score_final"] = float(it.get("score_ce_raw", 0.0))
+                it["score_final_mode"] = f"{fusion_mode}_ce_final"
+            items.sort(
+                key=lambda x: (float(x.get("score_ce_raw", 0.0)), float(x.get("score_fusion", 0.0))),
+                reverse=True,
+            )
+            return items[:top_k]
+
+        # ce_blend (default)
+        fusion_norm_values = self._normalize_scores([float(i.get("score_fusion", 0.0)) for i in items], final_fusion_norm)
+        ce_enabled = use_ce and final_w_ce > 0.0
+        ce_norm_values: list[float]
+        if ce_enabled:
+            if final_ce_score == "raw":
+                ce_norm_values = self._normalize_scores([float(i.get("score_ce_raw", 0.0)) for i in items], "minmax")
+            else:
+                ce_norm_values = [float(i.get("score_ce", 0.0)) for i in items]
+        else:
+            ce_norm_values = [0.0 for _ in items]
+
+        total = final_w_fusion + final_w_ce
+        if total > 0.0:
+            wf = final_w_fusion / total
+            wc = final_w_ce / total
+        else:
+            wf, wc = 1.0, 0.0
+
+        for it, fusion_norm, ce_norm in zip(items, fusion_norm_values, ce_norm_values, strict=True):
+            it["score_fusion_norm"] = float(fusion_norm)
+            it["score_ce_norm"] = float(ce_norm)
+            it["score_final"] = wf * float(fusion_norm) + wc * float(ce_norm)
+            it["score_final_mode"] = f"{fusion_mode}_ce_blend"
+
+        items.sort(
+            key=lambda x: (float(x.get("score_final", 0.0)), float(x.get("score_fusion_norm", 0.0)), float(x.get("score_ce_norm", 0.0))),
+            reverse=True,
+        )
+        return items[:top_k]
 
     def _should_run_cross_encoder(
         self,
@@ -1174,16 +1209,18 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         items: list[dict[str, tp.Any]] | None,
         use_reranker: bool,
         fusion_mode: str,
-        ce_as_final_rank: bool,
-        w_ce: float,
+        final_rank_mode: str,
+        final_w_ce: float,
     ) -> bool:
         """Определяет, запускать ли cross-encoder для текущей конфигурации поиска."""
         if not items or not use_reranker:
             return False
-        if self._is_ce_final_rank_mode(fusion_mode=fusion_mode, ce_as_final_rank=ce_as_final_rank):
+        if final_rank_mode == "ce_final":
             return True
-        if fusion_mode == "weighted_score" and not ce_as_final_rank:
-            return w_ce > 0.0
+        if final_rank_mode == "ce_blend":
+            return final_w_ce > 0.0
+        if final_rank_mode == "legacy_weighted":
+            return fusion_mode == "weighted_score" and final_w_ce > 0.0
         return False
 
     def _build_hybrid_version(
@@ -1204,8 +1241,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             f":rrf_w_dense={settings_local.rrf_w_dense}"
             f":rrf_w_lex={settings_local.rrf_w_lex}"
             f":reranker={int(reranker_enabled)}"
-            f":ce_final={int(getattr(settings_local, 'ce_as_final_rank', True))}"
-            f":w_ce={getattr(settings_local, 'w_ce', 0.0)}"
+            f":final_rank_mode={getattr(settings_local, 'final_rank_mode', 'ce_blend')}"
+            f":final_w_ce={getattr(settings_local, 'final_w_ce', 0.0)}"
         )
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
