@@ -41,7 +41,10 @@ def test_weighted_ce_final_mode_uses_raw_ce_sort() -> None:
         use_ce=True,
         w_dense=0.55,
         w_lex=0.15,
-        w_ce=0.3,
+        final_w_fusion=0.6,
+        final_w_ce=0.3,
+        final_fusion_norm="minmax",
+        final_ce_score="raw",
         fusion_mode="weighted_score",
         ce_as_final_rank=True,
     )
@@ -172,23 +175,24 @@ def test_build_hybrid_version_contains_ce_flags() -> None:
     assert v_on != v_off
 
 
-def test_apply_short_settings_overrides_rrf_weights_and_w_ce() -> None:
-    """Проверяет, что short override подменяет rrf-веса и w_ce."""
+def test_apply_short_settings_overrides_rrf_weights_and_final_settings() -> None:
+    """Проверяет, что short override подменяет rrf-веса и final-настройки."""
     o = _build_orchestrator()
     o.short = SimpleNamespace(
         top_k=3,
         w_lex=0.7,
         w_dense=0.3,
-        w_ce=0.3,
+        final_w_fusion=0.6,
+        final_w_ce=0.3,
+        final_fusion_norm="minmax",
+        final_ce_score="raw",
         rrf_w_dense=2.0,
         rrf_w_lex=3.0,
         dense_top_k=11,
         lex_top_k=12,
         fusion_mode="rrf",
         rrf_k=30,
-        use_hybrid=True,
         use_opensearch=True,
-        use_reranker=False,
         mode=True,
         mode_limit=4,
     )
@@ -196,7 +200,10 @@ def test_apply_short_settings_overrides_rrf_weights_and_w_ce() -> None:
         top_k=10,
         w_lex=0.15,
         w_dense=0.55,
-        w_ce=0.0,
+        final_w_fusion=0.8,
+        final_w_ce=0.1,
+        final_fusion_norm="max",
+        final_ce_score="processed",
         rrf_w_dense=1.0,
         rrf_w_lex=1.0,
         dense_top_k=50,
@@ -204,8 +211,11 @@ def test_apply_short_settings_overrides_rrf_weights_and_w_ce() -> None:
         fusion_mode="weighted_score",
         rrf_k=60,
     )
-    switches_local = SimpleNamespace(use_hybrid=False, use_opensearch=False, use_reranker=True)
+    switches_local = SimpleNamespace(use_opensearch=False)
     updated_settings, _ = o._apply_short_settings(settings_local=settings_local, switches_local=switches_local)
-    assert updated_settings.w_ce == 0.3
+    assert updated_settings.final_w_ce == 0.3
+    assert updated_settings.final_w_fusion == 0.6
+    assert updated_settings.final_fusion_norm == "minmax"
+    assert updated_settings.final_ce_score == "raw"
     assert updated_settings.rrf_w_dense == 2.0
     assert updated_settings.rrf_w_lex == 3.0
