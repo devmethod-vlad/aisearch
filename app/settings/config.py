@@ -1,3 +1,5 @@
+import ast
+import json
 import typing as tp
 from collections.abc import Sequence
 from datetime import time
@@ -430,19 +432,62 @@ class RerankerSettings(EnvBaseSettings):
     max_length: int = 192
     score_mode: str = "sigmoid"
     softmax_temp: float = 0.7
-    pairs_fields: str | list[str]
+    pairs_fields: tp.Annotated[list[str] | dict[str, str], NoDecode]
     dtype: str = "fp16"
     model_config = SettingsConfigDict(env_prefix="reranker_")
 
-    @model_validator(mode="after")
-    def assemble_pairs_settings(self) -> tp.Self:
-        """Парсинг pairs_fields из строки в список"""
-        if isinstance(self.pairs_fields, str):
-            self.pairs_fields = [
-                f.strip() for f in self.pairs_fields.split(",") if f.strip()
-            ]
+    @field_validator("pairs_fields", mode="before")
+    @classmethod
+    def parse_pairs_fields(cls, value: tp.Any) -> list[str] | dict[str, str]:
+        """Парсит поля для второй части пары reranker из CSV/list или object-формата."""
 
-        return self
+        def normalize_list(items: tp.Iterable[tp.Any]) -> list[str]:
+            return [str(item).strip() for item in items if str(item).strip()]
+
+        def normalize_dict(items: dict[tp.Any, tp.Any]) -> dict[str, str]:
+            normalized: dict[str, str] = {}
+            for key, label in items.items():
+                key_str = str(key).strip()
+                if not key_str:
+                    continue
+                normalized[key_str] = str(label).strip()
+            return normalized
+
+        if isinstance(value, dict):
+            return normalize_dict(value)
+
+        if isinstance(value, (list, tuple, set)):
+            return normalize_list(value)
+
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+
+            if raw.startswith("{"):
+                parsed: tp.Any
+                try:
+                    parsed = json.loads(raw)
+                except json.JSONDecodeError:
+                    try:
+                        parsed = ast.literal_eval(raw)
+                    except (ValueError, SyntaxError) as exc:
+                        raise ValueError(
+                            "pairs_fields: некорректный объектный формат, ожидается JSON-объект или Python dict-подобная строка"
+                        ) from exc
+
+                if not isinstance(parsed, dict):
+                    raise ValueError(
+                        "pairs_fields: объектный формат должен быть словарем field->label"
+                    )
+
+                return normalize_dict(parsed)
+
+            return normalize_list(raw.split(","))
+
+        raise ValueError(
+            "pairs_fields: поддерживаются только str, list/tuple/set или dict"
+        )
 
 
 class WarmupSettings(BaseSettings):
