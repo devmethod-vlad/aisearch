@@ -52,6 +52,32 @@ def _validate_rrf_k(value: int) -> int:
     return value
 
 
+def _normalize_final_rank_mode(value: str) -> str:
+    """Нормализует режим финального ранжирования и валидирует допустимые значения."""
+    normalized = value.strip().lower()
+    if normalized not in {"fusion_only", "ce_final", "ce_blend", "legacy_weighted"}:
+        raise ValueError(
+            "final_rank_mode должен быть одним из: fusion_only, ce_final, ce_blend, legacy_weighted"
+        )
+    return normalized
+
+
+def _normalize_final_fusion_norm(value: str) -> str:
+    """Нормализует тип нормализации fusion-скора на финальном ранжировании."""
+    normalized = value.strip().lower()
+    if normalized not in {"max", "minmax"}:
+        raise ValueError("final_fusion_norm должен быть max или minmax")
+    return normalized
+
+
+def _normalize_final_ce_score(value: str) -> str:
+    """Нормализует источник CE-скора для финального ранжирования."""
+    normalized = value.strip().lower()
+    if normalized not in {"processed", "raw"}:
+        raise ValueError("final_ce_score должен быть processed или raw")
+    return normalized
+
+
 class AppSettings(EnvBaseSettings):
     """Настройки приложения FastAPI."""
 
@@ -215,10 +241,13 @@ class HybridSearchSettings(EnvBaseSettings):
     top_k: int = 5
     w_dense: float = 0.25
     w_lex: float = 0.15
-    w_ce: float = 0.0
     rrf_w_dense: float = 1.0
     rrf_w_lex: float = 1.0
-    ce_as_final_rank: bool = True
+    final_rank_mode: str = "legacy_weighted"
+    final_w_fusion: float = 0.7
+    final_w_ce: float = 0.3
+    final_fusion_norm: str = "max"
+    final_ce_score: str = "processed"
     dense_abs_min: float = 0.25
     dense_rel_min: float = 0.6
     lex_rel_min: float = 0.5
@@ -244,6 +273,21 @@ class HybridSearchSettings(EnvBaseSettings):
 
         self.fusion_mode = _normalize_fusion_mode(self.fusion_mode)
         self.rrf_k = _validate_rrf_k(self.rrf_k)
+        self.final_rank_mode = _normalize_final_rank_mode(self.final_rank_mode)
+        self.final_fusion_norm = _normalize_final_fusion_norm(self.final_fusion_norm)
+        self.final_ce_score = _normalize_final_ce_score(self.final_ce_score)
+
+        if self.final_w_fusion < 0:
+            raise ValueError("final_w_fusion не может быть отрицательным")
+        if self.final_w_ce < 0:
+            raise ValueError("final_w_ce не может быть отрицательным")
+        if (
+            self.final_rank_mode == "legacy_weighted"
+            and self.fusion_mode != "weighted_score"
+        ):
+            raise ValueError(
+                "HYBRID_FINAL_RANK_MODE=legacy_weighted is allowed only with HYBRID_FUSION_MODE=weighted_score"
+            )
 
         return self
 
@@ -303,8 +347,6 @@ class SearchSwitches(EnvBaseSettings):
     """Настройки переключателей поиска"""
 
     use_opensearch: bool
-    use_reranker: bool
-    use_hybrid: bool
     model_config = SettingsConfigDict(env_prefix="search_")
 
 
@@ -523,16 +565,17 @@ class ShortSettings(EnvBaseSettings):
     mode: bool = True
     mode_limit: int
     use_opensearch: bool
-    use_reranker: bool
-    use_hybrid: bool
     dense_top_k: int = 20
     lex_top_k: int = 50
     top_k: int = 5
     w_dense: float = 0.25
     w_lex: float = 0.15
-    w_ce: float = 0.0
     rrf_w_dense: float = 1.0
     rrf_w_lex: float = 1.0
+    final_w_fusion: float = 0.7
+    final_w_ce: float = 0.3
+    final_fusion_norm: str = "max"
+    final_ce_score: str = "processed"
     fusion_mode: str = "weighted_score"
     rrf_k: int = 60
 
@@ -541,6 +584,12 @@ class ShortSettings(EnvBaseSettings):
         """Нормализует и валидирует short-параметры fusion stage."""
         self.fusion_mode = _normalize_fusion_mode(self.fusion_mode)
         self.rrf_k = _validate_rrf_k(self.rrf_k)
+        self.final_fusion_norm = _normalize_final_fusion_norm(self.final_fusion_norm)
+        self.final_ce_score = _normalize_final_ce_score(self.final_ce_score)
+        if self.final_w_fusion < 0:
+            raise ValueError("final_w_fusion не может быть отрицательным")
+        if self.final_w_ce < 0:
+            raise ValueError("final_w_ce не может быть отрицательным")
         return self
 
     model_config = SettingsConfigDict(env_prefix="short_")
