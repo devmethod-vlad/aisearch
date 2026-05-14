@@ -217,8 +217,11 @@ def test_hybrid_settings() -> HybridSearchSettings:
         top_k=5,
         w_dense=0.25,
         w_lex=0.15,
-        w_ce=0.0,
-        ce_as_final_rank=True,
+        final_rank_mode="legacy_weighted",
+        final_w_fusion=0.7,
+        final_w_ce=0.3,
+        final_fusion_norm="max",
+        final_ce_score="processed",
         dense_abs_min=0.25,
         dense_rel_min=0.6,
         lex_rel_min=0.5,
@@ -288,8 +291,6 @@ def test_switches_settings() -> SearchSwitches:
     """Настройки переключателей поиска для тестов"""
     return SearchSwitches(
         use_opensearch=True,
-        use_reranker=True,
-        use_hybrid=True,
     )
 
 
@@ -336,14 +337,15 @@ def test_short_settings() -> ShortSettings:
         mode=True,
         mode_limit=10,
         use_opensearch=True,
-        use_reranker=True,
-        use_hybrid=True,
         dense_top_k=20,
         lex_top_k=50,
         top_k=5,
         w_dense=0.25,
         w_lex=0.15,
-        w_ce=0.0,
+        final_w_fusion=0.7,
+        final_w_ce=0.3,
+        final_fusion_norm="max",
+        final_ce_score="processed",
     )
 
 

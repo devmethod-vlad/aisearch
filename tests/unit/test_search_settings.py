@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.settings.config import ShortSettings
+from app.settings.config import HybridSearchSettings, ShortSettings
 
 
 def test_short_fusion_mode_rrf_normalized() -> None:
@@ -12,8 +12,6 @@ def test_short_fusion_mode_rrf_normalized() -> None:
         mode=True,
         mode_limit=3,
         use_opensearch=True,
-        use_reranker=False,
-        use_hybrid=True,
         fusion_mode="rrf",
     )
 
@@ -26,8 +24,6 @@ def test_short_fusion_mode_weighted_score_trimmed() -> None:
         mode=True,
         mode_limit=3,
         use_opensearch=True,
-        use_reranker=False,
-        use_hybrid=True,
         fusion_mode=" weighted_score ",
     )
 
@@ -41,8 +37,6 @@ def test_short_fusion_mode_invalid_value_raises_error() -> None:
             mode=True,
             mode_limit=3,
             use_opensearch=True,
-            use_reranker=False,
-            use_hybrid=True,
             fusion_mode="bad",
         )
 
@@ -54,8 +48,6 @@ def test_short_rrf_k_must_be_positive() -> None:
             mode=True,
             mode_limit=3,
             use_opensearch=True,
-            use_reranker=False,
-            use_hybrid=True,
             rrf_k=0,
         )
 
@@ -63,8 +55,16 @@ def test_short_rrf_k_must_be_positive() -> None:
         mode=True,
         mode_limit=3,
         use_opensearch=True,
-        use_reranker=False,
-        use_hybrid=True,
         rrf_k=1,
     )
     assert valid.rrf_k == 1
+
+
+def test_hybrid_legacy_weighted_forbidden_with_rrf() -> None:
+    """Проверяет, что legacy_weighted отклоняется при fusion_mode=rrf."""
+    with pytest.raises(ValidationError, match="HYBRID_FINAL_RANK_MODE=legacy_weighted"):
+        HybridSearchSettings(
+            intermediate_results_top_k=10,
+            fusion_mode="rrf",
+            final_rank_mode="legacy_weighted",
+        )
