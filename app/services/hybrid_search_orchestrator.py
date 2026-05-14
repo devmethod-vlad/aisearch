@@ -789,32 +789,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         с семантикой OR внутри поля и AND между полями.
         """
         os_adapter = self.os_adapter
-        filter_clauses = [
-            *build_opensearch_token_filter_clauses(token_filters),
-            *build_opensearch_exact_filter_clauses(exact_filters),
-        ]
-        # Формируем multi_match конфиг lexical-ветки OpenSearch.
-        # minimum_should_match прокидываем только в OR-режиме и только при непустом значении.
-        multi_match: dict[str, tp.Any] = {
-            "query": query,
-            "type": os_adapter.config.multi_match_type,
-            "fields": os_adapter.config.search_fields,
-            "operator": os_adapter.config.operator,
-            "fuzziness": os_adapter.config.fuzziness,
-        }
-        if os_adapter.config.operator == "or" and os_adapter.config.min_should_match:
-            multi_match["minimum_should_match"] = os_adapter.config.min_should_match
-
-        body = {
-            "query": {
-                "bool": {
-                    "must": {
-                        "multi_match": multi_match
-                    },
-                    "filter": filter_clauses,
-                }
-            }
-        }
+        filter_clauses = []
+        filter_clauses.extend(build_opensearch_token_filter_clauses(token_filters))
+        filter_clauses.extend(build_opensearch_exact_filter_clauses(exact_filters))
+        body = self._build_os_search_body(query=query, filter_clauses=filter_clauses)
 
         hits = await os_adapter.search(body, k)
 
@@ -851,6 +829,66 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                     x["score_lex"] = 0.0
 
         return out
+
+    def _build_os_multi_match_query(self, query: str) -> dict[str, tp.Any]:
+        """Собирает основной lexical multi_match запрос OpenSearch для пользовательского query."""
+        multi_match: dict[str, tp.Any] = {
+            "query": query,
+            "type": self.os_adapter.config.multi_match_type,
+            "fields": self.os_adapter.config.search_fields,
+            "operator": self.os_adapter.config.operator,
+            "fuzziness": self.os_adapter.config.fuzziness,
+        }
+        if self.os_adapter.config.operator == "or" and self.os_adapter.config.min_should_match:
+            multi_match["minimum_should_match"] = self.os_adapter.config.min_should_match
+        return {"multi_match": multi_match}
+
+    def _build_os_phrase_should_clauses(self, query: str) -> list[dict[str, tp.Any]]:
+        """Собирает дополнительные phrase-сигналы для multi-signal режима lexical-поиска."""
+        clauses: list[dict[str, tp.Any]] = []
+        for field_name, boost in self.os_adapter.config.phrase_field_boosts.items():
+            phrase_body: dict[str, tp.Any] = {"query": query, "boost": boost}
+            if self.os_adapter.config.phrase_slop > 0:
+                phrase_body["slop"] = self.os_adapter.config.phrase_slop
+            clauses.append({"match_phrase": {field_name: phrase_body}})
+        return clauses
+
+    def _build_os_search_body(
+        self,
+        *,
+        query: str,
+        filter_clauses: list[dict[str, tp.Any]],
+    ) -> dict[str, tp.Any]:
+        """Строит body OpenSearch lexical-ветки в simple или multi-signal режиме по текущим settings."""
+        base_body = {
+            "_source": self.os_adapter.config.output_fields,
+            "track_total_hits": False,
+        }
+        if not self.os_adapter.config.phrase_field_boosts:
+            return {
+                **base_body,
+                "query": {
+                    "bool": {
+                        "must": self._build_os_multi_match_query(query),
+                        "filter": filter_clauses,
+                    }
+                },
+            }
+
+        should_clauses = [
+            *self._build_os_phrase_should_clauses(query),
+            self._build_os_multi_match_query(query),
+        ]
+        return {
+            **base_body,
+            "query": {
+                "bool": {
+                    "filter": filter_clauses,
+                    "should": should_clauses,
+                    "minimum_should_match": self.os_adapter.config.bool_min_should_match,
+                }
+            },
+        }
 
     async def _presearch_exact_match(
         self,

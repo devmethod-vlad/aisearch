@@ -152,6 +152,13 @@
     # best_fields | most_fields | cross_fields | phrase | phrase_prefix | bool_prefix
     OS_MULTI_MATCH_TYPE=best_fields
     OS_FUZZINESS=0
+    # {} или пусто => simple mode (bool.must + single multi_match)
+    # непустой JSON-объект => multi-signal mode (bool.should + phrase + multi_match)
+    OS_PHRASE_FIELD_BOOSTS={}
+    # slop для match_phrase сигналов (используется только при непустом OS_PHRASE_FIELD_BOOSTS)
+    OS_PHRASE_SLOP=0
+    # minimum_should_match на уровне bool.should для multi-signal режима
+    OS_BOOL_MIN_SHOULD_MATCH=1
     OS_USE_RESCORE=false
     OS_INDEX_ANSWER=true
     OS_BULK_CHUNK_SIZE=1000

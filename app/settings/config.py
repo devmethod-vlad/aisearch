@@ -84,11 +84,11 @@ def _normalize_os_operator(value: str) -> str:
     """Нормализует OS operator и проверяет допустимые значения."""
     normalized = value.strip().lower()
     if normalized not in {"or", "and"}:
-        raise ValueError("os operator должен быть 'or' или 'and'")
+        raise ValueError("OS_OPERATOR должен быть 'or' или 'and'")
     return normalized
 
 
-def _normalize_multi_match_type(value: str) -> str:
+def _normalize_os_multi_match_type(value: str) -> str:
     """Нормализует тип multi_match и валидирует допустимые значения OpenSearch."""
     normalized = value.strip().lower()
     allowed = {
@@ -419,12 +419,57 @@ class OpenSearchSettings(EnvBaseSettings):
     operator: str = "or"
     min_should_match: str = "1"
     multi_match_type: str = "best_fields"
+    phrase_field_boosts: tp.Annotated[dict[str, float], NoDecode] = {}
+    phrase_slop: int = 0
+    bool_min_should_match: int = 1
     fuzziness: int = 0
     use_rescore: bool = False
     index_answer: bool = True
     schema_path: str = "app/settings/os_index.json"
     bulk_chunk_size: int = 1000
     model_config = SettingsConfigDict(env_prefix="os_")
+
+    @field_validator("phrase_field_boosts", mode="before")
+    @classmethod
+    def parse_phrase_field_boosts(cls, value: tp.Any) -> dict[str, float]:
+        """Парсит phrase-бусты field->boost из JSON/dict и отфильтровывает пустые/невалидные значения."""
+        if value is None:
+            return {}
+
+        parsed: tp.Any = value
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw in {"", "{}"}:
+                return {}
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                try:
+                    parsed = ast.literal_eval(raw)
+                except (ValueError, SyntaxError) as exc:
+                    raise ValueError(
+                        "OS_PHRASE_FIELD_BOOSTS должен быть JSON-объектом field->boost"
+                    ) from exc
+
+        if not isinstance(parsed, dict):
+            raise ValueError("OS_PHRASE_FIELD_BOOSTS должен быть объектом field->boost")
+
+        normalized: dict[str, float] = {}
+        for field_name, boost_value in parsed.items():
+            field_name_normalized = str(field_name).strip()
+            if not field_name_normalized:
+                continue
+            try:
+                boost = float(boost_value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    f"OS_PHRASE_FIELD_BOOSTS[{field_name_normalized}] должен приводиться к float"
+                ) from exc
+            if boost <= 0:
+                continue
+            normalized[field_name_normalized] = boost
+
+        return normalized
 
     @model_validator(mode="after")
     def assemble_os_settings(self) -> tp.Self:
@@ -438,8 +483,12 @@ class OpenSearchSettings(EnvBaseSettings):
                 f.strip() for f in self.output_fields.split(",") if f.strip()
             ]
         self.operator = _normalize_os_operator(self.operator)
-        self.multi_match_type = _normalize_multi_match_type(self.multi_match_type)
+        self.multi_match_type = _normalize_os_multi_match_type(self.multi_match_type)
         self.min_should_match = str(self.min_should_match).strip()
+        if self.phrase_slop < 0:
+            raise ValueError("OS_PHRASE_SLOP должен быть >= 0")
+        if self.bool_min_should_match < 1:
+            raise ValueError("OS_BOOL_MIN_SHOULD_MATCH должен быть >= 1")
 
         return self
 
