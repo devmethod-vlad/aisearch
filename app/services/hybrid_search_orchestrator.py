@@ -384,10 +384,24 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         weighted_w_ce = float(getattr(settings_local, "final_w_ce", 0.0))
         rrf_w_dense = settings_local.rrf_w_dense
         rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_opensearch else 0.0
-        lex_enable = bool(weighted_w_lex or rrf_w_lex)
-        reranker_enabled = bool(getattr(switches_local, "use_reranker", True))
         final_rank_mode = str(getattr(settings_local, "final_rank_mode", "ce_blend"))
         fusion_mode = settings_local.fusion_mode
+        if fusion_mode == "rrf":
+            dense_search_enabled = settings_local.dense_top_k > 0 and rrf_w_dense > 0
+            lexical_search_enabled = (
+                bool(switches_local.use_opensearch)
+                and settings_local.lex_top_k > 0
+                and rrf_w_lex > 0
+            )
+        else:
+            dense_search_enabled = settings_local.dense_top_k > 0 and weighted_w_dense > 0
+            lexical_search_enabled = (
+                bool(switches_local.use_opensearch)
+                and settings_local.lex_top_k > 0
+                and weighted_w_lex > 0
+            )
+        lex_enable = lexical_search_enabled
+        cross_encoder_enabled = False
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
 
@@ -421,7 +435,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 )
                 hybrid_version = self._build_hybrid_version(
                     settings_local=settings_local,
-                    reranker_enabled=reranker_enabled,
+                    use_opensearch=bool(switches_local.use_opensearch),
                 )
                 cache_key = build_search_cache_key(
                     collection_name=settings_local.collection_name,
@@ -472,8 +486,6 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         presearch_start = time.perf_counter()
                         presearch_use_ce = self._should_run_cross_encoder(
                             items=[{}],
-                            use_reranker=reranker_enabled,
-                            fusion_mode=fusion_mode,
                             final_rank_mode=final_rank_mode,
                             final_w_ce=weighted_w_ce,
                         )
@@ -498,7 +510,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                     # ---- Dense & Lex search ----
                     async def _dense_task() -> list[dict[str, tp.Any]]:
-                        if weighted_w_dense == 0.0 and rrf_w_dense == 0.0:
+                        if not dense_search_enabled:
                             return []
                         start = time.perf_counter()
                         res = await self.vector_db.search(
@@ -516,18 +528,15 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         return res
 
                     async def _lex_task() -> list[dict[str, tp.Any]]:
-                        if weighted_w_lex == 0.0 and rrf_w_lex == 0.0:
+                        if not lexical_search_enabled:
                             return []
                         start = time.perf_counter()
-                        if switches_local.use_opensearch:
-                            res = await self._os_candidates(
-                                query=query,
-                                k=settings_local.lex_top_k,
-                                token_filters=token_filters,
-                                exact_filters=exact_filters,
-                            )
-                        else:
-                            res = []
+                        res = await self._os_candidates(
+                            query=query,
+                            k=settings_local.lex_top_k,
+                            token_filters=token_filters,
+                            exact_filters=exact_filters,
+                        )
                         res = self._precut_lex(res)
                         metrics["lexical_search_time"] = self._metrics_logger("🕒 Lexical search", start)
                         return res
@@ -551,11 +560,10 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
                     should_run_ce = self._should_run_cross_encoder(
                         items=merged,
-                        use_reranker=reranker_enabled,
-                        fusion_mode=fusion_mode,
                         final_rank_mode=final_rank_mode,
                         final_w_ce=weighted_w_ce,
                     )
+                    cross_encoder_enabled = should_run_ce
                     # ---- Cross-encoder stage ----
                     if should_run_ce and merged:
                         start = time.perf_counter()
@@ -580,6 +588,8 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         for m in merged:
                             m.setdefault("score_ce_raw", 0.0)
                             m.setdefault("score_ce", 0.0)
+                    else:
+                        cross_encoder_enabled = False
 
                     _results = self._score_and_slice(
                         merged,
@@ -658,7 +668,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         reranker_time=_convert_to_ms_or_return_0(metrics.get("cross_encoder_time")),
                         model_name=self.model_name,
                         reranker_name=self.ce_model_name,
-                        reranker_enable=reranker_enabled,
+                        reranker_enable=cross_encoder_enabled,
                         lex_enable=lex_enable,
                         from_cache=bool(metrics.get("cache_parse_time")),
                         lex_candidate=lex_candidate,
@@ -688,20 +698,28 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "full_search_task_time": metrics.get("full_search_task_time"),
                         "cross_encoder_time": metrics.get("cross_encoder_time"),
                         "total_time": metrics.get("total_search_time"),
-                        "reranker_enabled": reranker_enabled,
-                        "open_search_enabled": lex_enable,
+                        "dense_search_enabled": dense_search_enabled,
+                        "lexical_search_enabled": lexical_search_enabled,
+                        "cross_encoder_enabled": cross_encoder_enabled,
+                        "reranker_enabled": cross_encoder_enabled,
+                        "open_search_enabled": lexical_search_enabled,
                         "from_cache": metrics.get("cache_parse_time", False),
                         "hybrid_dense_top_k": len(dense),
                         "hybrid_lex_top_k": len(lex),
                         "hybrid_top_k": top_k,
                         "hybrid_w_dense": weighted_w_dense,
                         "hybrid_w_lex": weighted_w_lex,
+                        # legacy alias for benchmark compatibility.
                         "hybrid_w_ce": weighted_w_ce,
                         "hybrid_rrf_w_dense": rrf_w_dense,
                         "hybrid_rrf_w_lex": rrf_w_lex,
                         "hybrid_fusion_mode": fusion_mode,
                         "hybrid_rrf_k": settings_local.rrf_k,
                         "hybrid_final_rank_mode": final_rank_mode,
+                        "hybrid_final_w_fusion": float(getattr(settings_local, "final_w_fusion", 1.0)),
+                        "hybrid_final_w_ce": weighted_w_ce,
+                        "hybrid_final_fusion_norm": str(getattr(settings_local, "final_fusion_norm", "max")),
+                        "hybrid_final_ce_score": str(getattr(settings_local, "final_ce_score", "processed")),
                         "short_mode_applied": short_mode_applied,
                         "hybrid_score_final_mode": score_final_mode,
                         "encoder_model": self.model_name,
@@ -1207,27 +1225,25 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         self,
         *,
         items: list[dict[str, tp.Any]] | None,
-        use_reranker: bool,
-        fusion_mode: str,
         final_rank_mode: str,
         final_w_ce: float,
     ) -> bool:
         """Определяет, запускать ли cross-encoder для текущей конфигурации поиска."""
-        if not items or not use_reranker:
+        if not items:
             return False
         if final_rank_mode == "ce_final":
             return True
         if final_rank_mode == "ce_blend":
             return final_w_ce > 0.0
         if final_rank_mode == "legacy_weighted":
-            return fusion_mode == "weighted_score" and final_w_ce > 0.0
+            return final_w_ce > 0.0
         return False
 
     def _build_hybrid_version(
         self,
         settings_local: tp.Any,
         *,
-        reranker_enabled: bool,
+        use_opensearch: bool,
     ) -> str:
         """Формирует версию гибридного пайплайна для cache key.
 
@@ -1240,9 +1256,14 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             f":rrf_k={settings_local.rrf_k}"
             f":rrf_w_dense={settings_local.rrf_w_dense}"
             f":rrf_w_lex={settings_local.rrf_w_lex}"
-            f":reranker={int(reranker_enabled)}"
+            f":w_dense={settings_local.w_dense}"
+            f":w_lex={settings_local.w_lex}"
+            f":use_opensearch={int(use_opensearch)}"
             f":final_rank_mode={getattr(settings_local, 'final_rank_mode', 'ce_blend')}"
+            f":final_w_fusion={getattr(settings_local, 'final_w_fusion', 1.0)}"
             f":final_w_ce={getattr(settings_local, 'final_w_ce', 0.0)}"
+            f":final_fusion_norm={getattr(settings_local, 'final_fusion_norm', 'max')}"
+            f":final_ce_score={getattr(settings_local, 'final_ce_score', 'processed')}"
         )
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
@@ -1285,8 +1306,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 await self.os_adapter.search({"query": {"match_all": {}}}, 1)
 
             # 5) Реранкер — одно предсказание
-            if bool(getattr(self.switches, "use_reranker", True)):
-                _ = await asyncio.to_thread(self.ce.rank_fast, [("warmup", "warmup")])
+            _ = await asyncio.to_thread(self.ce.rank_fast, [("warmup", "warmup")])
             # 6) normalize
             normalize_query("врач", self.morph)
             return True
