@@ -237,21 +237,25 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
         Функция используется в `documents_search`, когда short-mode действительно
         сработал (`SHORT_MODE=true` и длина запроса <= `SHORT_MODE_LIMIT`).
-        Обновляет retrieval и fusion-параметры, а также переключатели веток
-        pipeline (hybrid/opensearch/reranker) на short-значения.
+        Обновляет retrieval/fusion/final-score параметры на short-значения.
+        Важно: `HYBRID_FINAL_RANK_MODE` остаётся глобальным и здесь не
+        переопределяется.
         """
         settings_local.top_k = self.short.top_k
         settings_local.w_lex = self.short.w_lex
         settings_local.w_dense = self.short.w_dense
-        settings_local.w_ce = self.short.w_ce
         settings_local.rrf_w_dense = self.short.rrf_w_dense
         settings_local.rrf_w_lex = self.short.rrf_w_lex
         settings_local.dense_top_k = self.short.dense_top_k
         settings_local.lex_top_k = self.short.lex_top_k
         settings_local.fusion_mode = self.short.fusion_mode
         settings_local.rrf_k = self.short.rrf_k
+        settings_local.final_w_fusion = self.short.final_w_fusion
+        settings_local.final_w_ce = self.short.final_w_ce
+        settings_local.final_fusion_norm = self.short.final_fusion_norm
+        settings_local.final_ce_score = self.short.final_ce_score
 
-        switches_local = deepcopy(self.short)
+        switches_local.use_opensearch = self.short.use_opensearch
         return settings_local, switches_local
 
     async def documents_search(
@@ -376,13 +380,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         else:
             lex_candidate = ""
         weighted_w_dense = settings_local.w_dense
-        weighted_w_lex = settings_local.w_lex if switches_local.use_hybrid else 0.0
-        weighted_w_ce = settings_local.w_ce
+        weighted_w_lex = settings_local.w_lex if switches_local.use_opensearch else 0.0
+        weighted_w_ce = float(getattr(settings_local, "final_w_ce", getattr(settings_local, "w_ce", 0.0)))
         rrf_w_dense = settings_local.rrf_w_dense
-        rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_hybrid else 0.0
+        rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_opensearch else 0.0
         lex_enable = bool(weighted_w_lex or rrf_w_lex)
-        reranker_enabled = bool(switches_local.use_reranker)
-        ce_as_final_rank = bool(getattr(settings_local, "ce_as_final_rank", True))
+        reranker_enabled = bool(getattr(switches_local, "use_reranker", True))
+        ce_as_final_rank = bool(getattr(settings_local, "ce_as_final_rank", True))  # TODO: migrate to final_rank_mode
         fusion_mode = settings_local.fusion_mode
         dense, lex = [], []
         merged: list[dict[str, tp.Any]] | None = None
@@ -515,16 +519,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         if weighted_w_lex == 0.0 and rrf_w_lex == 0.0:
                             return []
                         start = time.perf_counter()
-                        if switches_local.use_hybrid:
-                            if switches_local.use_opensearch:
-                                res = await self._os_candidates(
-                                    query=query,
-                                    k=settings_local.lex_top_k,
-                                    token_filters=token_filters,
-                                    exact_filters=exact_filters,
-                                )
-                            else:
-                                res = []
+                        if switches_local.use_opensearch:
+                            res = await self._os_candidates(
+                                query=query,
+                                k=settings_local.lex_top_k,
+                                token_filters=token_filters,
+                                exact_filters=exact_filters,
+                            )
                         else:
                             res = []
                         res = self._precut_lex(res)
@@ -1243,12 +1244,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             )
 
             # 4) Лексическа
-            if self.switches.use_hybrid:
-                if self.switches.use_opensearch:
-                    await self.os_adapter.search({"query": {"match_all": {}}}, 1)
+            if self.switches.use_opensearch:
+                await self.os_adapter.search({"query": {"match_all": {}}}, 1)
 
             # 5) Реранкер — одно предсказание
-            if self.switches.use_reranker:
+            if bool(getattr(self.switches, "use_reranker", True)):
                 _ = await asyncio.to_thread(self.ce.rank_fast, [("warmup", "warmup")])
             # 6) normalize
             normalize_query("врач", self.morph)
