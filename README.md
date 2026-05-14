@@ -147,7 +147,10 @@
     OS_SEARCH_FIELDS=question,analysis,answer
     OS_OUTPUT_FIELDS=row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy,jira
     OS_OPERATOR=or
+    # minimum_should_match применяется только при OS_OPERATOR=or
     OS_MIN_SHOULD_MATCH=1
+    # best_fields | most_fields | cross_fields | phrase | phrase_prefix | bool_prefix
+    OS_MULTI_MATCH_TYPE=best_fields
     OS_FUZZINESS=0
     OS_USE_RESCORE=false
     OS_INDEX_ANSWER=true

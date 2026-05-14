@@ -80,6 +80,33 @@ def _normalize_final_ce_score(value: str) -> str:
     return normalized
 
 
+def _normalize_os_operator(value: str) -> str:
+    """Нормализует OS operator и проверяет допустимые значения."""
+    normalized = value.strip().lower()
+    if normalized not in {"or", "and"}:
+        raise ValueError("os operator должен быть 'or' или 'and'")
+    return normalized
+
+
+def _normalize_multi_match_type(value: str) -> str:
+    """Нормализует тип multi_match и валидирует допустимые значения OpenSearch."""
+    normalized = value.strip().lower()
+    allowed = {
+        "best_fields",
+        "most_fields",
+        "cross_fields",
+        "phrase",
+        "phrase_prefix",
+        "bool_prefix",
+    }
+    if normalized not in allowed:
+        raise ValueError(
+            "OS_MULTI_MATCH_TYPE должен быть одним из: "
+            "best_fields, most_fields, cross_fields, phrase, phrase_prefix, bool_prefix"
+        )
+    return normalized
+
+
 class AppSettings(EnvBaseSettings):
     """Настройки приложения FastAPI."""
 
@@ -390,7 +417,8 @@ class OpenSearchSettings(EnvBaseSettings):
         "row_idx,source,ext_id,page_id,role,component,question,analysis,answer,answer_copy"
     )
     operator: str = "or"
-    min_should_match: int = 1
+    min_should_match: str = "1"
+    multi_match_type: str = "best_fields"
     fuzziness: int = 0
     use_rescore: bool = False
     index_answer: bool = True
@@ -409,6 +437,9 @@ class OpenSearchSettings(EnvBaseSettings):
             self.output_fields = [
                 f.strip() for f in self.output_fields.split(",") if f.strip()
             ]
+        self.operator = _normalize_os_operator(self.operator)
+        self.multi_match_type = _normalize_multi_match_type(self.multi_match_type)
+        self.min_should_match = str(self.min_should_match).strip()
 
         return self
 

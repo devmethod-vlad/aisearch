@@ -762,16 +762,23 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             *build_opensearch_token_filter_clauses(token_filters),
             *build_opensearch_exact_filter_clauses(exact_filters),
         ]
+        # Формируем multi_match конфиг lexical-ветки OpenSearch.
+        # minimum_should_match прокидываем только в OR-режиме и только при непустом значении.
+        multi_match: dict[str, tp.Any] = {
+            "query": query,
+            "type": os_adapter.config.multi_match_type,
+            "fields": os_adapter.config.search_fields,
+            "operator": os_adapter.config.operator,
+            "fuzziness": os_adapter.config.fuzziness,
+        }
+        if os_adapter.config.operator == "or" and os_adapter.config.min_should_match:
+            multi_match["minimum_should_match"] = os_adapter.config.min_should_match
+
         body = {
             "query": {
                 "bool": {
                     "must": {
-                        "multi_match": {
-                            "query": query,
-                            "fields": os_adapter.config.search_fields,
-                            "operator": os_adapter.config.operator,
-                            "fuzziness": os_adapter.config.fuzziness,
-                        }
+                        "multi_match": multi_match
                     },
                     "filter": filter_clauses,
                 }
