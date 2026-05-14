@@ -1267,15 +1267,44 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         )
 
     def _concat_text(self, item: dict[str, tp.Any]) -> str:
+        """Собирает текст документа для второй части пары cross-encoder/reranker.
+
+        Поддерживает два режима конфигурации `RERANKER_PAIRS_FIELDS`:
+        - список полей (legacy CSV/list): строки склеиваются только из значений полей;
+        - словарь field->label: к значению добавляется префикс `label: `.
+
+        Пустые/None-значения пропускаются в обоих режимах. Сложные типы
+        сериализуются в JSON, чтобы получить читабельный текст без Python repr.
+        """
+
+        def stringify(value: tp.Any) -> str:
+            """Безопасно преобразует значение поля кандидата в строку для реранкера."""
+            if value is None:
+                return ""
+            if isinstance(value, (dict, list, tuple)):
+                return json.dumps(value, ensure_ascii=False).strip()
+            return str(value).strip()
+
         fields = self.reranker_pairs_fields
-        parts: list[str] = []
+        lines: list[str] = []
 
-        for f in fields:
-            val = item.get(f)
-            if isinstance(val, str) and val.strip():
-                parts.append(val.strip())
+        # Новый объектный формат: field_name -> человекочитаемая подпись.
+        if isinstance(fields, dict):
+            for field_name, field_label in fields.items():
+                value = stringify(item.get(field_name))
+                if not value:
+                    continue
+                label = field_label.strip() if field_label.strip() else field_name
+                lines.append(f"{label}: {value}")
+            return "\n".join(lines)
 
-        return "\n\n".join(parts)
+        # Legacy-формат: список полей без подписей, только значения.
+        for field_name in fields:
+            value = stringify(item.get(field_name))
+            if value:
+                lines.append(value)
+
+        return "\n".join(lines)
 
     async def warmup(self) -> bool:
         """Прогрев"""
