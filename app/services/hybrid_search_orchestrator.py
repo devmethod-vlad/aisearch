@@ -183,6 +183,33 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             return int(cached_top_k)
         return int(settings_local.top_k)
 
+    def _is_positive_number(self, value: tp.Any) -> bool:
+        """Проверяет, что значение корректно приводится к числу и строго > 0."""
+        try:
+            return value is not None and float(value) > 0.0
+        except (TypeError, ValueError):
+            return False
+
+    def _is_dense_search_enabled(
+        self,
+        settings_local: tp.Any,
+        *,
+        fusion_mode: str,
+    ) -> bool:
+        """Определяет, должна ли dense-ветка поиска участвовать в pipeline.
+
+        Функция используется в `documents_search` после применения short-mode
+        override (если он сработал), поэтому опирается только на effective
+        значения `settings_local`.
+        """
+        if not self._is_positive_number(getattr(settings_local, "dense_top_k", None)):
+            return False
+
+        if fusion_mode == "rrf":
+            return self._is_positive_number(getattr(settings_local, "rrf_w_dense", None))
+
+        return self._is_positive_number(getattr(settings_local, "w_dense", None))
+
     def _dump_search_cache_payload(
         self,
         *,
@@ -386,19 +413,21 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_opensearch else 0.0
         final_rank_mode = str(getattr(settings_local, "final_rank_mode", "ce_blend"))
         fusion_mode = settings_local.fusion_mode
+        dense_search_enabled = self._is_dense_search_enabled(
+            settings_local=settings_local,
+            fusion_mode=fusion_mode,
+        )
         if fusion_mode == "rrf":
-            dense_search_enabled = settings_local.dense_top_k > 0 and rrf_w_dense > 0
             lexical_search_enabled = (
                 bool(switches_local.use_opensearch)
-                and settings_local.lex_top_k > 0
-                and rrf_w_lex > 0
+                and self._is_positive_number(getattr(settings_local, "lex_top_k", None))
+                and self._is_positive_number(rrf_w_lex)
             )
         else:
-            dense_search_enabled = settings_local.dense_top_k > 0 and weighted_w_dense > 0
             lexical_search_enabled = (
                 bool(switches_local.use_opensearch)
-                and settings_local.lex_top_k > 0
-                and weighted_w_lex > 0
+                and self._is_positive_number(getattr(settings_local, "lex_top_k", None))
+                and self._is_positive_number(weighted_w_lex)
             )
         lex_enable = lexical_search_enabled
         cross_encoder_enabled = False
@@ -497,20 +526,22 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         metrics["presearch_time"] = self._metrics_logger("🕒 Presearch (exact match)", presearch_start)
 
                     # ---- Embedding ----
-                    encode_start = time.perf_counter()
-                    query_vector = (
-                        await asyncio.to_thread(
-                            self.model.encode,
-                            [query],
-                            convert_to_numpy=True,
-                            normalize_embeddings=True,
-                        )
-                    )[0]
-                    metrics["embedding_time"] = self._metrics_logger("🕒 Model encode", encode_start)
+                    query_vector = None
+                    if dense_search_enabled:
+                        encode_start = time.perf_counter()
+                        query_vector = (
+                            await asyncio.to_thread(
+                                self.model.encode,
+                                [query],
+                                convert_to_numpy=True,
+                                normalize_embeddings=True,
+                            )
+                        )[0]
+                        metrics["embedding_time"] = self._metrics_logger("🕒 Model encode", encode_start)
 
                     # ---- Dense & Lex search ----
                     async def _dense_task() -> list[dict[str, tp.Any]]:
-                        if not dense_search_enabled:
+                        if not dense_search_enabled or query_vector is None:
                             return []
                         start = time.perf_counter()
                         res = await self.vector_db.search(
