@@ -126,7 +126,7 @@ def test_build_hybrid_version_contains_new_final_settings_only() -> None:
     assert v1 != v2 and v3 != v4
     assert ":final_w_ce=0.2" in v3 and ":final_w_fusion=0.8" in v3
     assert ":final_fusion_norm=minmax" in v4 and ":final_ce_score=raw" in v4
-    assert "ce_as_final_rank" not in v1 and ":w_ce=" not in v1
+    assert ":final_rank_mode=fusion_only" in v1 and ":final_rank_mode=ce_final" in v2
 
 
 def test_apply_short_settings_overrides_final_and_switches() -> None:

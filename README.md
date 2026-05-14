@@ -102,9 +102,14 @@
     LLM_QUEUE_DRAIN_INTERVAL_SEC=1
 
     # === Переключатели поиска ===
-    SEARCH_USE_HYBRID=true        # если false -> только dense + (опц.)
     SEARCH_USE_OPENSEARCH=true
-    SEARCH_USE_RERANKER=true  # управляет reranker для обычного поиска
+
+    # === Финальный ранжир гибридного поиска ===
+    HYBRID_FINAL_RANK_MODE=fusion_only
+    HYBRID_FINAL_W_FUSION=1.0
+    HYBRID_FINAL_W_CE=0.0
+    HYBRID_FINAL_FUSION_NORM=max
+    HYBRID_FINAL_CE_SCORE=processed
 
     # === Параметры гибридного склейщика ===
     HYBRID_DENSE_TOP_K=20
@@ -236,9 +241,7 @@
     SHORT_W_LEX=0.15
     SHORT_FUSION_MODE=weighted_score
     SHORT_RRF_K=60
-    SHORT_USE_HYBRID=true        # если false -> только dense + (опц.)
     SHORT_USE_OPENSEARCH=true
-    SHORT_USE_RERANKER=true   # управляет reranker для short-mode
     SHORT_MODE=true
     SHORT_MODE_LIMIT=4
 
@@ -379,16 +382,18 @@ python3 pre_launch.py --export-only
 - `SHORT_RRF_W_LEX` → `HYBRID_RRF_W_LEX`
 - `SHORT_FUSION_MODE` → `HYBRID_FUSION_MODE`
 - `SHORT_RRF_K` → `HYBRID_RRF_K`
-- `SHORT_USE_HYBRID` → `SEARCH_USE_HYBRID`
 - `SHORT_USE_OPENSEARCH` → `SEARCH_USE_OPENSEARCH`
-- `SHORT_USE_RERANKER` → `SEARCH_USE_RERANKER`
+- `SHORT_FINAL_W_FUSION` → `HYBRID_FINAL_W_FUSION`
+- `SHORT_FINAL_W_CE` → `HYBRID_FINAL_W_CE`
+- `SHORT_FINAL_FUSION_NORM` → `HYBRID_FINAL_FUSION_NORM`
+- `SHORT_FINAL_CE_SCORE` → `HYBRID_FINAL_CE_SCORE`
 
 Нюансы при short-mode:
 - `top_k` из request body имеет приоритет над `SHORT_TOP_K` и `HYBRID_TOP_K`;
 - `SHORT_RRF_K` влияет только при `SHORT_FUSION_MODE=rrf`;
-- если lexical-ветка отключена (`SHORT_USE_HYBRID=false` или `SHORT_USE_OPENSEARCH=false`), RRF работает только по доступным candidate lists.
+- если `SEARCH_USE_OPENSEARCH=false` или `SHORT_USE_OPENSEARCH=false`, lexical-ветка отключена и RRF работает только по доступным candidate lists.
 
-`SEARCH_USE_RERANKER` управляет reranker для обычного поиска, а `SHORT_USE_RERANKER` — для short-mode. Отдельных CE-весов больше нет. При `reranker_enabled=true` итоговая сортировка идет по `score_ce_raw` (с `score_fusion` как tie-breaker), а `score_ce` остается диагностическим постобработанным значением (`RERANKER_SCORE_MODE`), при `reranker_enabled=false` — по `score_fusion`. CE не добавляется в RRF как отдельный ranker, потому что RRF — retrieval fusion stage, а CE — reranking stage.
+Финальное ранжирование управляется `HYBRID_FINAL_RANK_MODE` (`fusion_only|ce_final|ce_blend|legacy_weighted`). В short-mode для финального этапа используются переопределения `SHORT_FINAL_W_FUSION`, `SHORT_FINAL_W_CE`, `SHORT_FINAL_FUSION_NORM`, `SHORT_FINAL_CE_SCORE`.
 
 
 ## Локальная проверка CORS для frontend (Vite)
