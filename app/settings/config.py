@@ -322,8 +322,6 @@ class TokenFiltersSettings(EnvBaseSettings):
     model_config = SettingsConfigDict(env_prefix="token_filters_")
 
 
-
-
 class ExactFiltersSettings(EnvBaseSettings):
     """Настройки exact-фильтрации single-value полей."""
 
@@ -473,7 +471,8 @@ class RerankerSettings(EnvBaseSettings):
                         parsed = ast.literal_eval(raw)
                     except (ValueError, SyntaxError) as exc:
                         raise ValueError(
-                            "pairs_fields: некорректный объектный формат, ожидается JSON-объект или Python dict-подобная строка"
+                            "pairs_fields: некорректный объектный формат, ожидается "
+                            "JSON-объект или Python dict-подобная строка"
                         ) from exc
 
                 if not isinstance(parsed, dict):
