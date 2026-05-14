@@ -1,7 +1,7 @@
 import json
 import uuid
 from types import SimpleNamespace, TracebackType
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 
@@ -409,3 +409,153 @@ async def test_documents_search_cache_key_depends_on_fusion_mode() -> None:
     assert weighted_key != rrf_key
     assert "fusion=weighted_score:rrf_k=60" in weighted_key
     assert "fusion=rrf:rrf_k=100" in rrf_key
+
+
+@pytest.mark.asyncio
+async def test_documents_search_skips_dense_for_weighted_zero_w_dense() -> None:
+    """Проверяет отключение dense-ветки в weighted_score при w_dense=0."""
+    orchestrator = _build_orchestrator()
+    orchestrator.settings.fusion_mode = "weighted_score"
+    orchestrator.settings.dense_top_k = 5
+    orchestrator.settings.w_dense = 0.0
+    orchestrator.settings.w_lex = 1.0
+    orchestrator.settings.lex_top_k = 5
+    orchestrator.switches.use_opensearch = True
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.os_adapter.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_lex": 1.0}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "q", "metrics_enable": True}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_not_called()
+    orchestrator.vector_db.search.assert_not_called()
+    orchestrator.os_adapter.search.assert_awaited()
+    payload = json.loads(orchestrator.redis.set.await_args_list[-1].args[1])
+    assert payload["metrics"]["dense_search_enabled"] is False
+    assert payload["metrics"]["lexical_search_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_documents_search_skips_dense_for_weighted_zero_dense_top_k() -> None:
+    """Проверяет отключение dense-ветки в weighted_score при dense_top_k=0."""
+    orchestrator = _build_orchestrator()
+    orchestrator.settings.fusion_mode = "weighted_score"
+    orchestrator.settings.dense_top_k = 0
+    orchestrator.settings.w_dense = 1.0
+    orchestrator.settings.w_lex = 1.0
+    orchestrator.settings.lex_top_k = 5
+    orchestrator.switches.use_opensearch = True
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.os_adapter.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_lex": 1.0}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "q"}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_not_called()
+    orchestrator.vector_db.search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_documents_search_skips_dense_for_rrf_zero_rrf_w_dense() -> None:
+    """Проверяет отключение dense-ветки в rrf при rrf_w_dense=0."""
+    orchestrator = _build_orchestrator()
+    orchestrator.settings.fusion_mode = "rrf"
+    orchestrator.settings.dense_top_k = 5
+    orchestrator.settings.rrf_w_dense = 0.0
+    orchestrator.settings.rrf_w_lex = 1.0
+    orchestrator.settings.w_lex = 1.0
+    orchestrator.settings.lex_top_k = 5
+    orchestrator.switches.use_opensearch = True
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.os_adapter.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_lex": 1.0}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "q"}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_not_called()
+    orchestrator.vector_db.search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_documents_search_skips_dense_for_rrf_zero_dense_top_k() -> None:
+    """Проверяет отключение dense-ветки в rrf при dense_top_k=0."""
+    orchestrator = _build_orchestrator()
+    orchestrator.settings.fusion_mode = "rrf"
+    orchestrator.settings.dense_top_k = 0
+    orchestrator.settings.rrf_w_dense = 1.0
+    orchestrator.settings.rrf_w_lex = 1.0
+    orchestrator.settings.w_lex = 1.0
+    orchestrator.settings.lex_top_k = 5
+    orchestrator.switches.use_opensearch = True
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.os_adapter.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_lex": 1.0}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "q"}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_not_called()
+    orchestrator.vector_db.search.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_documents_search_short_mode_can_disable_dense_branch() -> None:
+    """Проверяет, что short-mode override может отключить dense-ветку."""
+    orchestrator = _build_orchestrator()
+    orchestrator.short = SimpleNamespace(
+        mode=True,
+        mode_limit=10,
+        top_k=3,
+        w_lex=1.0,
+        w_dense=1.0,
+        rrf_w_dense=1.0,
+        rrf_w_lex=1.0,
+        dense_top_k=0,
+        lex_top_k=5,
+        fusion_mode="weighted_score",
+        rrf_k=60,
+        final_w_fusion=1.0,
+        final_w_ce=0.0,
+        final_fusion_norm="max",
+        final_ce_score="processed",
+        use_opensearch=True,
+    )
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.os_adapter.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_lex": 1.0}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "short", "metrics_enable": True}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+    orchestrator_module.normalize_query = lambda query, morph: query
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_not_called()
+    orchestrator.vector_db.search.assert_not_called()
+    payload = json.loads(orchestrator.redis.set.await_args_list[-1].args[1])
+    assert payload["metrics"]["dense_search_enabled"] is False
+
+
+@pytest.mark.asyncio
+async def test_documents_search_dense_enabled_runs_embedding_and_milvus() -> None:
+    """Проверяет регрессию: при включенной dense-ветке embedding и Milvus вызываются."""
+    orchestrator = _build_orchestrator()
+    orchestrator.settings.fusion_mode = "weighted_score"
+    orchestrator.settings.dense_top_k = 5
+    orchestrator.settings.w_dense = 1.0
+    encode_mock = Mock(return_value=[[0.1]])
+    orchestrator.model = SimpleNamespace(encode=encode_mock)
+    orchestrator.vector_db.search = AsyncMock(return_value=[{"ext_id": "doc-1", "question": "q", "score_dense": 0.9}])
+    orchestrator.redis.get = AsyncMock(side_effect=[json.dumps({"query": "q"}), None])
+    orchestrator.redis.hash_get = AsyncMock(return_value="0")
+
+    await orchestrator.documents_search("task-1", "ticket-1", "pack", "result")
+
+    encode_mock.assert_called_once()
+    orchestrator.vector_db.search.assert_awaited_once()
