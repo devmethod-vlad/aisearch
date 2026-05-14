@@ -1,34 +1,21 @@
-# Hybrid search: fusion dense/lex и финальный rerank cross-encoder
+# Hybrid search: разделение fusion и final rank
 
-Дата актуализации: 2026-05-07  
-Контекст: `devmethod-vlad/aisearch`, изменения гибридного поиска после PR #15.
+Дата актуализации: 2026-05-14  
+Контекст: `devmethod-vlad/aisearch`, актуальная модель гибридного pipeline.
 
-## 1. Цель изменений
+## 1. Зачем разделены retrieval branches, fusion и final rank
 
-Изменения нужны, чтобы разделить два разных уровня гибридного поиска:
+Новая модель явно разделяет три этапа, чтобы упростить настройку и диагностику:
 
-1. **Retrieval** — dense и lexical ветки находят кандидатов.
-2. **Rerank** — cross-encoder точнее сортирует уже найденные кандидаты.
+1. **Retrieval branches** — dense и lexical ветки независимо находят кандидатов.
+2. **Fusion** — объединение dense/lex сигналов в единый `score_fusion`.
+3. **Final rank** — финальная сортировка кандидатов (с CE или без CE), управляемая отдельным режимом.
 
-Раньше итоговый score мог собираться как сумма трёх компонентов:
+Ключевая идея: fusion отвечает только за retrieval-сигналы dense/lex, а final rank отдельно решает, как использовать cross-encoder.
 
-```text
-score_final = score_ce (если reranker включен) или score_fusion (если reranker выключен)
-```
+---
 
-Такая схема смешивает retrieval-сигналы и rerank-сигнал в одной формуле. Новая модель проще:
-
-```text
-dense + lex -> fusion -> score_fusion -> optional cross-encoder -> score_final
-```
-
-Cross-encoder, если включён, теперь всегда является финальным сортировщиком.
-
-## 2. Что добавлено
-
-### `HYBRID_FUSION_MODE`
-
-Переменная управляет способом объединения dense/lex кандидатов.
+## 2. `HYBRID_FUSION_MODE`: как объединяются dense/lex сигналы
 
 Допустимые значения:
 
@@ -37,50 +24,9 @@ HYBRID_FUSION_MODE=weighted_score
 HYBRID_FUSION_MODE=rrf
 ```
 
-- `weighted_score` — взвешенная сумма `score_dense` и `score_lex`.
-- `rrf` — Reciprocal Rank Fusion по позициям документов в dense/lex списках.
+### 2.1 `weighted_score`
 
-### `HYBRID_RRF_K`
-
-Параметр RRF:
-
-```env
-HYBRID_RRF_K=60
-```
-
-Используется только при:
-
-```env
-HYBRID_FUSION_MODE=rrf
-```
-
-Чем больше `rrf_k`, тем мягче влияние разницы между соседними позициями.
-
-## 3. Что не добавлено
-
-Не вводится `HYBRID_RERANK_MODE`.
-
-Рассматривались два варианта:
-
-- `equal` — cross-encoder как равноправный компонент score;
-- `final` — cross-encoder как финальный сортировщик.
-
-От варианта `equal` отказались, чтобы не усложнять pipeline. Итоговое правило одно:
-
-```text
-если cross-encoder включён, он финально сортирует результаты;
-если выключен, результаты сортируются по score_fusion.
-```
-
-## 4. Режим `weighted_score`
-
-Используется при:
-
-```env
-HYBRID_FUSION_MODE=weighted_score
-```
-
-Формула retrieval fusion:
+Используется взвешенная сумма retrieval-оценок:
 
 ```text
 score_fusion = w_dense * score_dense + w_lex * score_lex
@@ -88,313 +34,206 @@ score_fusion = w_dense * score_dense + w_lex * score_lex
 
 Где:
 
-- `w_dense` — `HYBRID_W_DENSE`;
-- `w_lex` — `HYBRID_W_LEX`.
+- `w_dense` = `HYBRID_W_DENSE`
+- `w_lex` = `HYBRID_W_LEX`
 
-`SEARCH_USE_RERANKER` больше не должен участвовать в этой формуле.
+### 2.2 `rrf`
 
-Если cross-encoder выключен:
-
-```text
-score_final = score_fusion
-sort: score_fusion desc
-```
-
-Если cross-encoder включён:
+Используется Reciprocal Rank Fusion по позициям документа в dense и lexical списках:
 
 ```text
-score_final = score_ce
-sort: score_ce desc, score_fusion desc
+contribution_dense = rrf_w_dense / (rrf_k + dense_rank)
+contribution_lex = rrf_w_lex / (rrf_k + lex_rank)
+score_rrf_raw = contribution_dense + contribution_lex
+score_fusion = normalized RRF score или основной RRF fusion score, согласно реализации
 ```
 
-`score_fusion` остаётся полезным как retrieval score и tie-breaker.
+Где:
 
-## 5. Режим `rrf`
+- `rrf_k` = `HYBRID_RRF_K`
+- `rrf_w_dense` = `HYBRID_RRF_W_DENSE`
+- `rrf_w_lex` = `HYBRID_RRF_W_LEX`
 
-Используется при:
+---
+
+## 3. `HYBRID_FINAL_RANK_MODE`: как формируется финальная сортировка
+
+Допустимые значения:
 
 ```env
-HYBRID_FUSION_MODE=rrf
+HYBRID_FINAL_RANK_MODE=fusion_only
+HYBRID_FINAL_RANK_MODE=ce_final
+HYBRID_FINAL_RANK_MODE=ce_blend
+HYBRID_FINAL_RANK_MODE=legacy_weighted
 ```
 
-RRF объединяет не абсолютные score, а ранги документов в dense/lex списках.
+### 3.1 `fusion_only`
 
-Для dense-вклада:
-
-```text
-contribution_dense = w_dense / (rrf_k + dense_rank)
-```
-
-Для lexical-вклада:
-
-```text
-contribution_lex = w_lex / (rrf_k + lex_rank)
-```
-
-Raw score:
-
-```text
-score_rrf_raw = contribution_dense + contribution_lex
-```
-
-Если документ найден обеими ветками, он получает вклад от обеих. Это поднимает документы, которые одновременно хорошо находятся semantic и lexical поиском.
-
-После расчёта raw score выполняется нормализация в рамках одного запроса:
-
-```text
-score_fusion = score_rrf_raw / max(score_rrf_raw)
-```
-
-Если максимум равен нулю, `score_fusion = 0.0`.
-
-Если cross-encoder выключен:
+- CE не запускается.
+- Финальный score:
 
 ```text
 score_final = score_fusion
-sort: score_fusion desc
 ```
 
-Если cross-encoder включён:
+### 3.2 `ce_final`
+
+- CE запускается.
+- Финальный score:
 
 ```text
-score_final = score_ce
-sort: score_ce desc, score_fusion desc
+score_final = score_ce_raw
 ```
 
-Важно: cross-encoder не добавляется внутрь RRF как третий источник. RRF объединяет только retrieval-ветки dense и lex.
-
-## 6. Роль весов
-
-### `HYBRID_W_DENSE`
-
-В `weighted_score`:
+- Сортировка:
 
 ```text
-score_fusion += HYBRID_W_DENSE * score_dense
+sort: score_ce_raw desc, score_fusion desc
 ```
 
-В `rrf`:
+- `HYBRID_FINAL_CE_SCORE` в этом режиме не используется.
+
+### 3.3 `ce_blend`
+
+- CE запускается только если `HYBRID_FINAL_W_CE > 0`.
+- Финальный score строится из нормализованного fusion и нормализованного CE:
 
 ```text
-score_rrf_raw += HYBRID_W_DENSE / (rrf_k + dense_rank)
+score_final = normalized score_fusion + normalized CE
 ```
 
-### `HYBRID_W_LEX`
+- Используются:
+  - `HYBRID_FINAL_W_FUSION`
+  - `HYBRID_FINAL_W_CE`
+  - `HYBRID_FINAL_FUSION_NORM`
+  - `HYBRID_FINAL_CE_SCORE`
 
-В `weighted_score`:
+### 3.4 `legacy_weighted`
+
+- Разрешён только с `HYBRID_FUSION_MODE=weighted_score`.
+- Сохраняет старую удачную формулу:
 
 ```text
-score_fusion += HYBRID_W_LEX * score_lex
+score_final = w_dense * score_dense_norm + w_lex * score_lex + final_w_ce * score_ce
 ```
 
-В `rrf`:
+- Используется `score_ce`, а не `score_ce_raw`.
+- `HYBRID_FINAL_W_CE` заменяет прежний `HYBRID_W_CE`.
 
-```text
-score_rrf_raw += HYBRID_W_LEX / (rrf_k + lex_rank)
-```
+---
 
-### `SEARCH_USE_RERANKER`
+## 4. Когда запускается cross-encoder
 
-`SEARCH_USE_RERANKER` больше не является весом в итоговой формуле.
+- `fusion_only`: **никогда**.
+- `ce_final`: **всегда**, если есть candidates.
+- `ce_blend`: **только если** `HYBRID_FINAL_W_CE > 0`.
+- `legacy_weighted`: **только если** `HYBRID_FINAL_W_CE > 0`.
 
-Рекомендуемая новая семантика:
+---
 
-```text
-SEARCH_USE_RERANKER=true -> cross-encoder запускается
-SEARCH_USE_RERANKER=false -> cross-encoder не запускается
-```
+## 5. Когда запускается OpenSearch (lexical branch)
 
-Если cross-encoder запущен, он финально сортирует результаты когда флаг включен.
+OpenSearch branch не запускается, если выполняется хотя бы одно условие:
 
-## 7. Поля score в результате
+- `SEARCH_USE_OPENSEARCH=false`
+- `lex_top_k <= 0`
+- `HYBRID_FUSION_MODE=weighted_score` и `w_lex <= 0`
+- `HYBRID_FUSION_MODE=rrf` и `rrf_w_lex <= 0`
 
-### `score_dense`
+---
 
-Score dense retrieval после внутренней нормализации.
+## 6. Short mode override
 
-### `score_lex`
+Для short-режима используются отдельные override-параметры:
 
-Score lexical retrieval после нормализации OpenSearch score относительно top lexical hit.
+- `SHORT_FUSION_MODE`
+- `SHORT_DENSE_TOP_K`
+- `SHORT_LEX_TOP_K`
+- `SHORT_TOP_K`
+- `SHORT_W_DENSE`
+- `SHORT_W_LEX`
+- `SHORT_RRF_K`
+- `SHORT_RRF_W_DENSE`
+- `SHORT_RRF_W_LEX`
+- `SHORT_FINAL_W_FUSION`
+- `SHORT_FINAL_W_CE`
+- `SHORT_FINAL_FUSION_NORM`
+- `SHORT_FINAL_CE_SCORE`
+- `SHORT_USE_OPENSEARCH`
 
-### `score_fusion`
+Важно: `SHORT_FINAL_RANK_MODE` **не вводится**. Режим `HYBRID_FINAL_RANK_MODE` остаётся глобальным.
 
-Главный retrieval score после объединения dense/lex.
+---
 
-- В `weighted_score`: weighted dense/lex score.
-- В `rrf`: нормализованный RRF score.
+## 7. Score fields
 
-### `score_rrf_raw`
+- `score_dense` — dense score после внутренней нормализации.
+- `score_dense_raw` — исходный dense score до нормализации.
+- `score_lex` — lexical score (нормализованный внутри lexical-ветки).
+- `score_fusion` — итоговый fusion score после объединения dense/lex.
+- `score_rrf_raw` — raw RRF score до нормализации (актуален для `rrf`).
+- `score_fusion_norm` — нормализованный `score_fusion`, применяемый в blend-логике.
+- `score_ce_raw` — raw логит(ы) cross-encoder.
+- `score_ce` — CE score в рабочей шкале режима, где он нужен.
+- `score_ce_norm` — нормализованный CE score для blend-логики.
+- `score_final` — финальный score, по которому формируется выдача.
+- `score_final_mode` — режим формирования `score_final` (значение `HYBRID_FINAL_RANK_MODE`).
 
-Raw RRF score. Присутствует только при `HYBRID_FUSION_MODE=rrf`.
+---
 
-### `score_ce`
+## 8. Актуальные env-примеры
 
-Score cross-encoder. Присутствует, если cross-encoder реально запускался.
-
-### `score_final`
-
-Score, по которому сформирована финальная выдача.
-
-```text
-CE включён: score_final = score_ce
-CE выключен: score_final = score_fusion
-```
-
-## 8. Cache key
-
-Режим fusion влияет на выдачу, поэтому должен участвовать в cache key.
-
-Минимальная модель:
-
-```text
-hybrid_version = {HYBRID_VERSION}:fusion={HYBRID_FUSION_MODE}:rrf_k={HYBRID_RRF_K}
-```
-
-Это нужно, чтобы не смешивать кеши для:
-
-- `weighted_score`;
-- `rrf`;
-- разных значений `rrf_k`.
-
-Существующие части cache key должны сохраниться:
-
-- query hash;
-- `top_k`;
-- data version;
-- collection/index;
-- presearch key part;
-- token/exact filters key part.
-
-## 9. Intermediate results
-
-При `show_intermediate_results=true` полезно видеть все основные стадии pipeline.
-
-Сохраняются ключи:
-
-```text
-dense
-lex
-ce
-```
-
-Добавляется ключ:
-
-```text
-fusion
-```
-
-Смысл:
-
-- `dense` — top кандидаты по `score_dense`;
-- `lex` — top кандидаты по `score_lex`;
-- `fusion` — top merged candidates по `score_fusion`;
-- `ce` — top reranked candidates по `score_ce`, если cross-encoder запускался.
-
-## 10. Инварианты для дальнейшей разработки
-
-1. Fusion отвечает только за объединение dense/lex.
-2. Cross-encoder не участвует в RRF.
-3. Cross-encoder всегда финальный сортировщик, если включён.
-4. Старую формулу с `w_ce` в `score_final` не возвращать.
-5. При выключенном cross-encoder выдача сортируется по `score_fusion`.
-6. `weighted_score` не удалять: это режим обратной совместимости.
-7. Request-driven runtime из PR #15 не откатывать.
-8. Не возвращать глобальные env-флаги `APP_USE_CACHE`, `HYBRID_PRESEARCH_ENABLED`, `HYBRID_PRESEARCH_FIELD`, `HYBRID_ENABLE_INTERMEDIATE_RESULTS`.
-
-## 11. Рекомендуемые env-примеры
-
-Базовый weighted режим:
+### A) Production baseline
 
 ```env
 HYBRID_FUSION_MODE=weighted_score
-HYBRID_RRF_K=60
-SEARCH_USE_RERANKER=true
+HYBRID_FINAL_RANK_MODE=legacy_weighted
+HYBRID_W_DENSE=0.55
+HYBRID_W_LEX=0.15
+HYBRID_FINAL_W_CE=0.3
 ```
 
-RRF с cross-encoder:
+### B) `weighted_score` без CE
+
+```env
+HYBRID_FUSION_MODE=weighted_score
+HYBRID_FINAL_RANK_MODE=fusion_only
+```
+
+### C) `rrf` без CE
 
 ```env
 HYBRID_FUSION_MODE=rrf
-HYBRID_RRF_K=60
-SEARCH_USE_RERANKER=true
+HYBRID_FINAL_RANK_MODE=fusion_only
 ```
 
-RRF без cross-encoder:
+### D) `rrf + ce_blend`
 
 ```env
 HYBRID_FUSION_MODE=rrf
-HYBRID_RRF_K=60
-SEARCH_USE_RERANKER=false
+HYBRID_FINAL_RANK_MODE=ce_blend
+HYBRID_RRF_W_DENSE=1.0
+HYBRID_RRF_W_LEX=2.0
+HYBRID_FINAL_W_FUSION=0.7
+HYBRID_FINAL_W_CE=0.3
 ```
 
-## 12. Что проверять тестами
+### E) `ce_final`
 
-Минимальные тестовые сценарии:
-
-1. `weighted_score` без CE:
-   - `score_fusion = w_dense * score_dense + w_lex * score_lex`;
-   - `score_final = score_fusion`.
-
-2. `weighted_score` с CE:
-   - сортировка по `score_ce`;
-   - `score_fusion` используется как tie-breaker;
-   - `score_final = score_ce`.
-
-3. RRF merge:
-   - dense/lex объединяются по `merge_by_field`;
-   - документ из обеих веток получает оба вклада;
-   - есть `score_rrf_raw`;
-   - `score_fusion` нормализован в `[0, 1]`.
-
-4. `rrf` без CE:
-   - сортировка по `score_fusion`;
-   - `score_final = score_fusion`.
-
-5. `rrf` с CE:
-   - сортировка по `score_ce`;
-   - `score_fusion` используется как tie-breaker;
-   - `score_final = score_ce`.
-
-6. Cache key:
-   - различается для `weighted_score` и `rrf`;
-   - различается для разных `HYBRID_RRF_K`.
-
-7. Intermediate results:
-   - при `show_intermediate_results=true` есть `intermediate_results["fusion"]`.
-
-## 13. Краткая схема pipeline
-
-```text
-1. Read Redis pack.
-2. Parse query, top_k, runtime flags, presearch, filters.
-3. Normalize token/exact filters.
-4. Build cache key with fusion mode and rrf_k.
-5. Try cache if allowed.
-6. Optional presearch.
-7. Encode query.
-8. Run dense and lexical branches in parallel.
-9. Apply dense/lex precut.
-10. Apply fusion: weighted_score or rrf.
-11. Get merged candidates with score_fusion.
-12. If CE enabled, calculate score_ce.
-13. Final sort:
-    - CE enabled: score_ce desc, score_fusion desc;
-    - CE disabled: score_fusion desc.
-14. Set score_final.
-15. Inject presearch result if present.
-16. Save cache/result/metrics.
+```env
+HYBRID_FINAL_RANK_MODE=ce_final
 ```
 
-## 14. Практический смысл
+---
 
-После изменений pipeline становится проще анализировать:
+## 9. Инварианты
 
-```text
-retrieval отвечает за recall;
-fusion объединяет retrieval-источники;
-cross-encoder отвечает за precision финальной выдачи.
-```
-
-Если хорошие документы не попали в candidates — проблема в dense/lex retrieval или precut.  
-Если документы есть в `fusion`, но порядок плохой — смотреть cross-encoder.  
-Если weighted fusion нестабилен из-за разных шкал dense/lex — включать `HYBRID_FUSION_MODE=rrf`.
+1. Fusion объединяет только dense/lex retrieval-сигналы.
+2. Final rank mode определяет, используется ли CE и как.
+3. CE не является всегда финальным сортировщиком.
+4. `legacy_weighted` сохраняет старую удачную weighted формулу.
+5. `legacy_weighted` разрешён только с `weighted_score`.
+6. `fusion_only` не запускает CE.
+7. `ce_final` использует raw CE logits.
+8. `ce_blend` использует `HYBRID_FINAL_CE_SCORE`.
+9. `SEARCH_USE_OPENSEARCH` остаётся отдельным переключателем lexical branch.
