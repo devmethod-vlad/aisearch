@@ -82,6 +82,13 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
         w_lex=0.0,
         fusion_mode="weighted_score",
         rrf_k=60,
+        rrf_w_dense=1.0,
+        rrf_w_lex=1.0,
+        final_rank_mode="fusion_only",
+        final_w_fusion=1.0,
+        final_w_ce=0.0,
+        final_fusion_norm="max",
+        final_ce_score="processed",
         top_k=3,
     )
     orchestrator.switches = SimpleNamespace(
@@ -110,7 +117,12 @@ def _build_orchestrator() -> HybridSearchOrchestrator:
             output_fields=["ext_id", "question"],
             search_fields=["question"],
             operator="or",
+            min_should_match="1",
+            multi_match_type="best_fields",
             fuzziness=0,
+            phrase_field_boosts={},
+            phrase_slop=0,
+            bool_min_should_match=1,
         ),
         search=AsyncMock(return_value=[]),
     )
