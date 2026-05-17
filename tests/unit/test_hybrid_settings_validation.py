@@ -1,14 +1,21 @@
 """Тесты валидации HYBRID-настроек для финального ранжирования."""
 
+from typing import Any
+
 import pytest
 from pydantic import ValidationError
 
 from app.settings.config import HybridSearchSettings
 
 
-def _base_kwargs() -> dict:
+def _base_kwargs(**overrides: Any) -> dict[str, Any]:
     """Возвращает базовый набор валидных аргументов для HybridSearchSettings."""
-    return {"intermediate_results_top_k": 10, "fusion_mode": "weighted_score"}
+    kwargs: dict[str, Any] = {
+        "intermediate_results_top_k": 10,
+        "fusion_mode": "weighted_score",
+    }
+    kwargs.update(overrides)
+    return kwargs
 
 
 def test_final_rank_mode_accepts_all_supported_values() -> None:
@@ -21,9 +28,10 @@ def test_final_rank_mode_accepts_all_supported_values() -> None:
 def test_legacy_weighted_valid_with_weighted_score() -> None:
     """Проверяет, что legacy_weighted валиден в паре с weighted_score."""
     settings = HybridSearchSettings(
-        **_base_kwargs(),
-        fusion_mode="weighted_score",
-        final_rank_mode="legacy_weighted",
+        **_base_kwargs(
+            fusion_mode="weighted_score",
+            final_rank_mode="legacy_weighted",
+        )
     )
     assert settings.final_rank_mode == "legacy_weighted"
 
@@ -32,9 +40,10 @@ def test_legacy_weighted_invalid_with_rrf() -> None:
     """Проверяет, что legacy_weighted запрещен при fusion_mode=rrf."""
     with pytest.raises(ValidationError, match="HYBRID_FINAL_RANK_MODE=legacy_weighted"):
         HybridSearchSettings(
-            **_base_kwargs(),
-            fusion_mode="rrf",
-            final_rank_mode="legacy_weighted",
+            **_base_kwargs(
+                fusion_mode="rrf",
+                final_rank_mode="legacy_weighted",
+            )
         )
 
 
