@@ -14,14 +14,29 @@ from app.infrastructure.utils.token_filters import (
 from app.services.hybrid_search_orchestrator import HybridSearchOrchestrator
 
 
+def _os_config(**overrides: object) -> SimpleNamespace:
+    """Возвращает конфиг OpenSearch для unit-стабов с полным набором полей."""
+    base = {
+        "search_fields": ["question"],
+        "output_fields": ["ext_id"],
+        "operator": "or",
+        "min_should_match": "1",
+        "multi_match_type": "best_fields",
+        "fuzziness": 0,
+        "phrase_field_boosts": {},
+        "phrase_slop": 0,
+        "bool_min_should_match": 1,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 @pytest.mark.asyncio
 async def test_os_candidates_builds_term_filters() -> None:
     """Проверяет, что lexical-ветка OpenSearch включает token/exact filters в bool.filter."""
     orchestrator = HybridSearchOrchestrator.__new__(HybridSearchOrchestrator)
     os_adapter = SimpleNamespace()
-    os_adapter.config = SimpleNamespace(
-        search_fields=["question"], operator="or", fuzziness=0, output_fields=["ext_id"]
-    )
+    os_adapter.config = _os_config()
     os_adapter.search = AsyncMock(return_value=[])
     orchestrator.os_adapter = os_adapter
 
@@ -60,7 +75,7 @@ async def test_presearch_ignores_token_filters_in_query_body() -> None:
     """Проверяет, что presearch-запрос не наследует token-фильтры из основного поиска."""
     orchestrator = HybridSearchOrchestrator.__new__(HybridSearchOrchestrator)
     os_adapter = SimpleNamespace()
-    os_adapter.config = SimpleNamespace(output_fields=["ext_id"])
+    os_adapter.config = _os_config(output_fields=["ext_id"])
     os_adapter.search = AsyncMock(return_value=[])
     orchestrator.os_adapter = os_adapter
 

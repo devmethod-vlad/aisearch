@@ -8,7 +8,7 @@ from app.settings.config import HybridSearchSettings
 
 def _base_kwargs() -> dict:
     """Возвращает базовый набор валидных аргументов для HybridSearchSettings."""
-    return {"intermediate_results_top_k": 10}
+    return {"intermediate_results_top_k": 10, "fusion_mode": "weighted_score"}
 
 
 def test_final_rank_mode_accepts_all_supported_values() -> None:

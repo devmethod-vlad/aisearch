@@ -409,10 +409,11 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         weighted_w_dense = settings_local.w_dense
         weighted_w_lex = settings_local.w_lex if switches_local.use_opensearch else 0.0
         weighted_w_ce = float(getattr(settings_local, "final_w_ce", 0.0))
-        rrf_w_dense = settings_local.rrf_w_dense
-        rrf_w_lex = settings_local.rrf_w_lex if switches_local.use_opensearch else 0.0
+        rrf_w_dense = float(getattr(settings_local, "rrf_w_dense", 1.0))
+        rrf_w_lex = float(getattr(settings_local, "rrf_w_lex", 1.0)) if switches_local.use_opensearch else 0.0
         final_rank_mode = str(getattr(settings_local, "final_rank_mode", "ce_blend"))
-        fusion_mode = settings_local.fusion_mode
+        fusion_mode = str(getattr(settings_local, "fusion_mode", "weighted_score"))
+        rrf_k = int(getattr(settings_local, "rrf_k", 60))
         dense_search_enabled = self._is_dense_search_enabled(
             settings_local=settings_local,
             fusion_mode=fusion_mode,
@@ -580,7 +581,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                             lex=lex,
                             w_dense=rrf_w_dense,
                             w_lex=rrf_w_lex,
-                            rrf_k=settings_local.rrf_k,
+                            rrf_k=rrf_k,
                         )
                     else:
                         merged = self._merge_candidates(dense, lex)
@@ -745,7 +746,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                         "hybrid_rrf_w_dense": rrf_w_dense,
                         "hybrid_rrf_w_lex": rrf_w_lex,
                         "hybrid_fusion_mode": fusion_mode,
-                        "hybrid_rrf_k": settings_local.rrf_k,
+                        "hybrid_rrf_k": rrf_k,
                         "hybrid_final_rank_mode": final_rank_mode,
                         "hybrid_final_w_fusion": float(getattr(settings_local, "final_w_fusion", 1.0)),
                         "hybrid_final_w_ce": weighted_w_ce,
@@ -832,24 +833,30 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
 
     def _build_os_multi_match_query(self, query: str) -> dict[str, tp.Any]:
         """Собирает основной lexical multi_match запрос OpenSearch для пользовательского query."""
+        config = self.os_adapter.config
+        operator = str(getattr(config, "operator", "or"))
+        min_should_match = str(getattr(config, "min_should_match", "") or "").strip()
         multi_match: dict[str, tp.Any] = {
             "query": query,
-            "type": self.os_adapter.config.multi_match_type,
-            "fields": self.os_adapter.config.search_fields,
-            "operator": self.os_adapter.config.operator,
-            "fuzziness": self.os_adapter.config.fuzziness,
+            "type": getattr(config, "multi_match_type", "best_fields"),
+            "fields": getattr(config, "search_fields", []),
+            "operator": operator,
+            "fuzziness": getattr(config, "fuzziness", 0),
         }
-        if self.os_adapter.config.operator == "or" and self.os_adapter.config.min_should_match:
-            multi_match["minimum_should_match"] = self.os_adapter.config.min_should_match
+        if operator == "or" and min_should_match:
+            multi_match["minimum_should_match"] = min_should_match
         return {"multi_match": multi_match}
 
     def _build_os_phrase_should_clauses(self, query: str) -> list[dict[str, tp.Any]]:
         """Собирает дополнительные phrase-сигналы для multi-signal режима lexical-поиска."""
         clauses: list[dict[str, tp.Any]] = []
-        for field_name, boost in self.os_adapter.config.phrase_field_boosts.items():
+        config = self.os_adapter.config
+        phrase_field_boosts = getattr(config, "phrase_field_boosts", {}) or {}
+        phrase_slop = int(getattr(config, "phrase_slop", 0) or 0)
+        for field_name, boost in phrase_field_boosts.items():
             phrase_body: dict[str, tp.Any] = {"query": query, "boost": boost}
-            if self.os_adapter.config.phrase_slop > 0:
-                phrase_body["slop"] = self.os_adapter.config.phrase_slop
+            if phrase_slop > 0:
+                phrase_body["slop"] = phrase_slop
             clauses.append({"match_phrase": {field_name: phrase_body}})
         return clauses
 
@@ -860,11 +867,16 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         filter_clauses: list[dict[str, tp.Any]],
     ) -> dict[str, tp.Any]:
         """Строит body OpenSearch lexical-ветки в simple или multi-signal режиме по текущим settings."""
+        config = self.os_adapter.config
+        output_fields = getattr(config, "output_fields", [])
+        phrase_field_boosts = getattr(config, "phrase_field_boosts", {}) or {}
+        bool_min_should_match = int(getattr(config, "bool_min_should_match", 1) or 1)
+
         base_body = {
-            "_source": self.os_adapter.config.output_fields,
+            "_source": output_fields,
             "track_total_hits": False,
         }
-        if not self.os_adapter.config.phrase_field_boosts:
+        if not phrase_field_boosts:
             return {
                 **base_body,
                 "query": {
@@ -885,7 +897,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
                 "bool": {
                     "filter": filter_clauses,
                     "should": should_clauses,
-                    "minimum_should_match": self.os_adapter.config.bool_min_should_match,
+                    "minimum_should_match": bool_min_should_match,
                 }
             },
         }
@@ -1292,7 +1304,7 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
             it["score_final_mode"] = f"{fusion_mode}_ce_blend"
 
         items.sort(
-            key=lambda x: (float(x.get("score_final", 0.0)), float(x.get("score_fusion_norm", 0.0)), float(x.get("score_ce_norm", 0.0))),
+            key=lambda x: (float(x.get("score_final", 0.0)), float(x.get("score_ce_norm", 0.0)), float(x.get("score_fusion_norm", 0.0))),
             reverse=True,
         )
         return items[:top_k]
@@ -1327,13 +1339,13 @@ class HybridSearchOrchestrator(IHybridSearchOrchestrator):
         выдачу и предотвращают коллизии кеша между режимами с/без reranker.
         """
         return (
-            f"{settings_local.version}"
-            f":fusion={settings_local.fusion_mode}"
-            f":rrf_k={settings_local.rrf_k}"
-            f":rrf_w_dense={settings_local.rrf_w_dense}"
-            f":rrf_w_lex={settings_local.rrf_w_lex}"
-            f":w_dense={settings_local.w_dense}"
-            f":w_lex={settings_local.w_lex}"
+            f"{getattr(settings_local, 'version', '')}"
+            f":fusion={getattr(settings_local, 'fusion_mode', 'weighted_score')}"
+            f":rrf_k={getattr(settings_local, 'rrf_k', 60)}"
+            f":rrf_w_dense={getattr(settings_local, 'rrf_w_dense', 1.0)}"
+            f":rrf_w_lex={getattr(settings_local, 'rrf_w_lex', 1.0)}"
+            f":w_dense={getattr(settings_local, 'w_dense', 1.0)}"
+            f":w_lex={getattr(settings_local, 'w_lex', 0.0)}"
             f":use_opensearch={int(use_opensearch)}"
             f":final_rank_mode={getattr(settings_local, 'final_rank_mode', 'ce_blend')}"
             f":final_w_fusion={getattr(settings_local, 'final_w_fusion', 1.0)}"
